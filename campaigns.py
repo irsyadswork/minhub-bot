@@ -118,6 +118,23 @@ class CampaignWatcher:
             )
         return "\n".join(lines)
 
+    def intro(self, c: dict) -> tuple[str, discord.Embed]:
+        """Pesan pembuka (di-pin) di channel diskusi campaign: teks + kartu dengan banner campaign."""
+        url = self.link(c)
+        text = (f"👋 Ini tempat diskusi **{c.get('title')}**!\n"
+                f"📄 Brief & join: <{url}>\n"
+                f"Bingung soal campaign ini? Tanya aja di sini, {config.BOT_NAME} standby 😎")
+        embed = discord.Embed(title=c.get("title"), url=url, description=c.get("tagline") or None, color=0x488CFF)
+        embed.add_field(name="💰 Rate", value=f"{_rupiah(c.get('rate'))} / 1K views", inline=True)
+        embed.add_field(name="⏰ Deadline", value=_tanggal(c.get("deadline")), inline=True)
+        if c.get("hashtags"):
+            embed.add_field(name="#️⃣ Hashtag wajib", value=" ".join(c["hashtags"]), inline=False)
+        image = (c.get("poster") or {}).get("image")
+        if image:
+            embed.set_image(url=image if image.startswith("http") else config.CAMPAIGN_SITE + image)
+        embed.set_footer(text=config.SERVER_NAME)
+        return text, embed
+
     def announcement(self, c: dict) -> tuple[str, discord.Embed]:
         url = self.link(c)
         embed = discord.Embed(title=c.get("title", "Campaign baru"), url=url,

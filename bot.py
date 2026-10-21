@@ -187,12 +187,41 @@ async def sync_guild(guild: discord.Guild):
                 ch = await guild.create_text_channel(
                     watcher.channel_name(c), category=category, topic=watcher.channel_topic(c),
                     overwrites=public_overwrites(guild), reason=f"Minhub: diskusi campaign {c['slug']}")
-                await ch.send(f"👋 Ini tempat diskusi **{c.get('title')}**!\n"
-                              f"📄 Brief & join: {watcher.link(c)}\n"
-                              f"Bingung soal campaign ini? Tanya aja di sini, {config.BOT_NAME} standby 😎")
+                existing[c["slug"]] = ch
                 log.info("Bikin channel #%s", ch.name)
         except discord.Forbidden:
             log.warning("Minhub belum punya izin Manage Channels / Manage Roles, channel nggak bisa dibuat otomatis")
+            return
+
+        for slug, ch in existing.items():
+            c = watcher.get(slug)
+            if c and ch.id not in intro_done:
+                await ensure_intro(ch, c)
+
+
+intro_done: set[int] = set()
+
+
+async def ensure_intro(channel: discord.TextChannel, c: dict):
+    """Pastikan pesan pembuka campaign ada, pakai banner, dan di-pin. Pesan lama milik Minhub di-update."""
+    text, embed = watcher.intro(c)
+    msg = None
+    try:
+        async for m in channel.history(limit=30, oldest_first=True):
+            if m.author == client.user and m.content.startswith("👋 Ini tempat diskusi"):
+                msg = m
+                break
+        if msg is None:
+            msg = await channel.send(text, embed=embed)
+        elif not msg.embeds or not msg.embeds[0].image or msg.embeds[0].footer.text != config.SERVER_NAME:
+            msg = await msg.edit(content=text, embed=embed)
+        if not msg.pinned:
+            await msg.pin(reason="Minhub: pesan pembuka campaign")
+        intro_done.add(channel.id)
+    except discord.Forbidden:
+        log.warning("Belum bisa pin di #%s: role Minhub butuh izin Pin Messages", channel.name)
+    except discord.HTTPException:
+        log.exception("Gagal atur pesan pembuka #%s", channel.name)
 
 
 # ---------- event ----------
