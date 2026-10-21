@@ -59,6 +59,52 @@ class CampaignWatcher:
             json.dump(sorted(seen), f, indent=2)
         return [] if first_run else new
 
+    def active(self) -> list[dict]:
+        return [c for c in self.campaigns if c.get("status", "aktif") == "aktif"]
+
+    def get(self, slug: str):
+        return next((c for c in self.campaigns if c["slug"] == slug), None)
+
+    # --- Channel diskusi per campaign. Slug disimpan di topic channel biar bot tahu channel itu campaign apa. ---
+    TOPIC_TAG = "campaign:"
+
+    def channel_name(self, c: dict) -> str:
+        return (config.CAMPAIGN_CHANNEL_PREFIX + c["slug"])[:100]
+
+    def channel_topic(self, c: dict) -> str:
+        return f"Diskusi {c.get('title')} · brief: {self.link(c)} · {self.TOPIC_TAG}{c['slug']}"[:1024]
+
+    def slug_from_topic(self, topic) -> str | None:
+        if topic and self.TOPIC_TAG in topic:
+            return topic.split(self.TOPIC_TAG, 1)[1].split()[0].strip()
+        return None
+
+    def detail(self, c: dict) -> str:
+        """Detail lengkap satu campaign untuk konteks AI di channel campaign itu."""
+        def daftar(key):
+            items = c.get(key) or []
+            return "; ".join(str(i if not isinstance(i, dict) else i.get("text") or i.get("judul") or i) for i in items) or "-"
+
+        return "\n".join([
+            f"CHANNEL INI KHUSUS CAMPAIGN: {c.get('title')} (brand {c.get('brand')}, kategori {c.get('category')})",
+            f"- Tagline: {c.get('tagline') or '-'}",
+            f"- Link brief/detail & join: {self.link(c)}",
+            f"- Status: {c.get('status')} | Deadline: {_tanggal(c.get('deadline'))}",
+            f"- Bayaran: {_rupiah(c.get('rate'))} per 1.000 views ({c.get('payMode')})",
+            f"- Minimal views: {int(c.get('minViews') or 0):,} ({c.get('minViewsMode') or '-'})".replace(",", "."),
+            f"- Maksimal views dihitung per video: {int(c.get('maxViewsPerVideo') or 0):,}".replace(",", "."),
+            f"- Maksimal video yang boleh dikirim: {c.get('maxVideoKirim') or '-'}",
+            f"- Platform: {', '.join(c.get('platforms') or []) or '-'}",
+            f"- Hashtag wajib: {' '.join(c.get('hashtags') or []) or '-'}",
+            f"- Yang dicari: {daftar('lookingFor')}",
+            f"- Do's: {daftar('dos')}",
+            f"- Don'ts: {daftar('donts')}",
+            f"- Ide hook: {daftar('hooks')}",
+            f"- Aturan tambahan: {daftar('extraRules')}",
+            f"- Tentang: {daftar('about')}",
+            "Kalau ditanya hal yang nggak ada di atas, arahkan cek brief di link di atas atau tag admin.",
+        ])
+
     def summary(self) -> str:
         """Ringkasan campaign aktif untuk konteks AI."""
         lines = []

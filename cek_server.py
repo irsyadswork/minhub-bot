@@ -23,9 +23,9 @@ async def on_ready():
         print("Channel teks:", ", ".join(c.name for c in g.text_channels))
         print("Role:", ", ".join(r.name for r in g.roles if not r.is_default()))
         print("\nCocok dengan config.py:")
-        for label, name in [("WELCOME_CHANNEL", config.WELCOME_CHANNEL), ("BRIEF_CHANNEL", config.BRIEF_CHANNEL),
-                            ("RULES_CHANNEL", config.RULES_CHANNEL), ("CAMPAIGN_CHANNEL", config.CAMPAIGN_CHANNEL),
-                            *[("REPLY_CHANNELS", n) for n in config.REPLY_CHANNELS]]:
+        for label, name in [("WELCOME_CHANNEL", config.WELCOME_CHANNEL), ("GENERAL_CHANNEL", config.GENERAL_CHANNEL),
+                            ("CONTROL_CHANNEL", config.CONTROL_CHANNEL), ("RULES_CHANNEL", config.RULES_CHANNEL),
+                            ("CAMPAIGN_CHANNEL", config.CAMPAIGN_CHANNEL)]:
             ch = find_channel(g, name)
             ok = ch and ch.permissions_for(g.me).send_messages
             print(f"  {label:16} '{name}' -> {ch.name if ch else 'TIDAK KETEMU'}"

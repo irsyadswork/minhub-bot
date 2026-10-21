@@ -2,9 +2,18 @@
 
 Fitur:
 - **Welcome + kartu gambar** setiap ada member baru (tag username-nya).
-- **Jawab pertanyaan** kalau bot di-tag di channel diskusi. Pertanyaan basic dijawab langsung; yang teknis (payout, aturan detail, error akun) diarahkan ke brief/rules dan tag admin.
+- **Channel otomatis**: bot bikin `#diskusi`, `#minhub-control` (privat admin), dan satu channel diskusi per campaign aktif
+  di kategori "Diskusi Campaign 🎬". Campaign baru di website → channel baru otomatis. Slug campaign disimpan di topic channel.
+- **Paham konteks**: di channel campaign, bot tahu detail campaign itu (hashtag, min views, deadline, platform, dll.)
+  dan membaca ~10 pesan terakhir.
+- **Nimbrung pintar**: di `#diskusi` & channel campaign, bot menjawab pertanyaan walau tidak di-tag, tapi diam kalau
+  cuma basa-basi/obrolan antar member. Kalau di-tag (atau dibalas), bot selalu jawab.
 - **Jeda humanis** 5–60 detik dengan status "typing..." sebelum membalas.
-- **Pengumuman campaign baru** dari https://campaign.clipperhub.site (dicek tiap 3 menit) + link campaign-nya.
+- **Pengumuman campaign baru** dari https://campaign.clipperhub.site (dicek tiap 3 menit) + link campaign & channel diskusinya.
+- **Perintah admin** di `#minhub-control`: kirim screenshot + "share ini ke grup ssv, bilang angle baru" → bot kasih
+  preview, admin react ✅ → terkirim ke channel campaign itu.
+
+Butuh: Message Content Intent ON (Developer Portal) dan role Minhub punya izin **Manage Channels** + **Manage Roles**.
 
 ## Hosting 24/7 (Wispbyte) & cara update
 Bot jalan di Wispbyte (server `5579c560`), kodenya ditarik dari repo GitHub ini.

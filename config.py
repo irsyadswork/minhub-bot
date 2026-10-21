@@ -9,12 +9,17 @@ CAMPAIGN_SITE = "https://campaign.clipperhub.site"
 
 # --- Channel ---
 WELCOME_CHANNEL = "welcome-and-rules"  # tempat kartu welcome dikirim
-REPLY_CHANNELS = ["campaign", "diskusi"]  # bot cuma balas tag di channel/forum yang namanya mengandung ini ([] = semua)
-BRIEF_CHANNEL = ""                     # dirujuk kalau pertanyaannya teknis (kosongkan "" kalau belum ada)
+GENERAL_CHANNEL = "diskusi"            # diskusi umum (dibuat otomatis kalau belum ada)
+CONTROL_CHANNEL = "minhub-control"     # channel privat admin untuk ngasih perintah ke Minhub (dibuat otomatis)
+REPLY_CHANNELS = ["campaign"]          # channel/forum lama yang namanya mengandung ini: bot balas kalau di-tag
 RULES_CHANNEL = "rules"
 CAMPAIGN_CHANNEL = "pengumuman"        # tempat pengumuman campaign baru
 
-# --- Role admin yang di-tag untuk pertanyaan teknis ---
+# --- Channel per campaign (dibuat & diatur otomatis oleh bot) ---
+CAMPAIGN_CATEGORY = "Diskusi Campaign 🎬"
+CAMPAIGN_CHANNEL_PREFIX = "🎬・"
+
+# --- Role admin yang di-tag untuk pertanyaan teknis & boleh ngasih perintah ---
 ADMIN_ROLE = "Admin Komunitas"
 
 # --- Welcome ---
@@ -28,9 +33,14 @@ FONT_NAME = ["assets/Montserrat.ttf", "C:/Windows/Fonts/seguibl.ttf", "/usr/shar
 # --- Balasan humanis ---
 MIN_DELAY = 5                          # detik
 MAX_DELAY = 60
+AUTO_REPLY = True                      # di #diskusi & channel campaign: jawab pertanyaan walau nggak di-tag
+AUTO_REPLY_COOLDOWN = 20               # detik minimal antar jawaban "nimbrung" di satu channel
+HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar paham konteks obrolan
 
 # --- AI ---
-GEMINI_MODEL = "gemini-flash-latest"
+# Dicoba berurutan: kalau model pertama lambat/overload, otomatis pindah ke berikutnya.
+GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"]
+GEMINI_TIMEOUT = 15                    # detik per percobaan
 
 # --- Pengumuman campaign baru ---
 CAMPAIGN_CHECK_MINUTES = 3
