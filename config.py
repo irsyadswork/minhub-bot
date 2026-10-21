@@ -8,7 +8,7 @@ BOT_NAME = "Minhub"
 CAMPAIGN_SITE = "https://campaign.clipperhub.site"
 
 # --- Channel ---
-WELCOME_CHANNEL = "welcome-and-rules"  # tempat kartu welcome dikirim
+WELCOME_CHANNEL = "welcome"            # tempat kartu welcome dikirim
 GENERAL_CHANNEL = "diskusi"            # diskusi umum (dibuat otomatis kalau belum ada)
 CONTROL_CHANNEL = "minhub-control"     # channel privat admin untuk ngasih perintah ke Minhub (dibuat otomatis)
 REPLY_CHANNELS = ["campaign"]          # channel/forum lama yang namanya mengandung ini: bot balas kalau di-tag
