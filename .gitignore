@@ -2,6 +2,7 @@
 .env
 seen_campaigns.json
 viral_state.json
+reminder_state.json
 
 # Sampah lokal
 __pycache__/

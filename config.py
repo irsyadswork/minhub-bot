@@ -57,6 +57,10 @@ VIRAL_MIN_VIEWS = 100_000              # minimal views normal
 VIRAL_FALLBACK_MIN_VIEWS = 20_000      # minimal views kalau sudah lama nggak ada yang tembus 100rb
 VIRAL_STUCK_DAYS = 3                   # "lama" = berapa hari nggak ada yang tembus 100rb
 
+# --- Pengingat login Wispbyte (server gratis mati kalau 2 minggu nggak login) ---
+LOGIN_REMINDER_DAYS = 12               # Minhub tag admin di channel kontrol tiap sekian hari
+LOGIN_REMINDER_URL = "https://wispbyte.com/client"
+
 # --- Pengumuman campaign baru ---
 CAMPAIGN_CHECK_MINUTES = 3
 CAMPAIGN_TEXT = "🚨 **Campaign baru drop, guys!** Gas join sebelum slotnya penuh 👇"

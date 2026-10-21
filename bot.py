@@ -1,5 +1,6 @@
 """Minhub - bot Discord Clipper Hub Circle. Jalankan: python bot.py"""
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -209,6 +210,8 @@ async def on_ready():
         campaign_loop.start()
     if not viral_loop.is_running():
         viral_loop.start()
+    if not reminder_loop.is_running():
+        reminder_loop.start()
 
 
 @client.event
@@ -411,6 +414,36 @@ async def viral_loop():
                 await channel.send(viral.message(campaign, rec),
                                    allowed_mentions=discord.AllowedMentions(everyone=True))
                 log.info("Share konten meledak %s: %s views", slug, rec.get("views"))
+
+
+REMINDER_FILE = os.path.join(HERE, "reminder_state.json")
+
+
+@tasks.loop(hours=6)
+async def reminder_loop():
+    """Tiap LOGIN_REMINDER_DAYS hari, ingatkan admin login ke Wispbyte biar server gratisnya nggak dimatikan."""
+    today = datetime.date.today()
+    last = None
+    if os.path.exists(REMINDER_FILE):
+        with open(REMINDER_FILE, encoding="utf-8") as f:
+            last = datetime.date.fromisoformat(json.load(f)["last"])
+    if last is None:  # pertama kali jalan: mulai hitung dari hari ini
+        last = today
+    elif (today - last).days < config.LOGIN_REMINDER_DAYS:
+        return
+    else:
+        for guild in client.guilds:
+            channel = find_channel(guild, config.CONTROL_CHANNEL)
+            role = find_role(guild, config.ADMIN_ROLE)
+            if channel:
+                await channel.send(
+                    f"⏰ {role.mention if role else 'Admin'} pengingat rutin: login dulu ke {config.LOGIN_REMINDER_URL} "
+                    f"ya (cukup buka & login). Server gratis Wispbyte dimatikan kalau 2 minggu nggak login, "
+                    f"nanti aku ikut mati 😵",
+                    allowed_mentions=discord.AllowedMentions(roles=True))
+        last = today
+    with open(REMINDER_FILE, "w", encoding="utf-8") as f:
+        json.dump({"last": last.isoformat()}, f)
 
 
 if __name__ == "__main__":
