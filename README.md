@@ -18,7 +18,8 @@ Butuh: Message Content Intent ON (Developer Portal) dan role Minhub punya izin *
 ## Hosting 24/7 (Wispbyte) & cara update
 Bot jalan di Wispbyte (server `5579c560`), kodenya ditarik dari repo GitHub ini.
 1. Ubah kode di PC → `git commit` → `git push`.
-2. Buka https://wispbyte.com/client → server Minhub → **Restart** (tonton iklan). Auto Update menarik kode terbaru saat start.
+2. Buka https://wispbyte.com/client/servers/5579c560/github → **Pull** → **Pull Changes**.
+   Ini menarik kode terbaru lalu menyalakan ulang bot. (Tombol Restart biasa TIDAK menarik kode baru.)
 
 Catatan:
 - `.env` (token) tidak ada di GitHub; file itu di-upload manual sekali ke Files Wispbyte.
