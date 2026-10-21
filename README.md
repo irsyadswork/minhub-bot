@@ -6,7 +6,17 @@ Fitur:
 - **Jeda humanis** 5–60 detik dengan status "typing..." sebelum membalas.
 - **Pengumuman campaign baru** dari https://campaign.clipperhub.site (dicek tiap 3 menit) + link campaign-nya.
 
-## Menyalakan bot
+## Hosting 24/7 (Wispbyte) & cara update
+Bot jalan di Wispbyte (server `5579c560`), kodenya ditarik dari repo GitHub ini.
+1. Ubah kode di PC → `git commit` → `git push`.
+2. Buka https://wispbyte.com/client → server Minhub → **Restart** (tonton iklan). Auto Update menarik kode terbaru saat start.
+
+Catatan:
+- `.env` (token) tidak ada di GitHub; file itu di-upload manual sekali ke Files Wispbyte.
+- Login ke Wispbyte minimal tiap 2 minggu, kalau tidak server dihentikan.
+- Jangan jalankan bot di PC bersamaan dengan Wispbyte (balasan jadi dobel).
+
+## Menyalakan bot di PC (untuk tes)
 Double-click **`jalankan-bot.bat`**, atau jalankan:
 ```
 python bot.py
