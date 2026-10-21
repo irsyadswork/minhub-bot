@@ -203,18 +203,17 @@ intro_done: set[int] = set()
 
 
 async def ensure_intro(channel: discord.TextChannel, c: dict):
-    """Pastikan pesan pembuka campaign ada, pakai banner, dan di-pin. Pesan lama milik Minhub di-update."""
+    """Pastikan pesan pembuka campaign (versi dengan banner) ada dan di-pin."""
     text, embed = watcher.intro(c)
     msg = None
     try:
-        async for m in channel.history(limit=30, oldest_first=True):
-            if m.author == client.user and m.content.startswith("👋 Ini tempat diskusi"):
+        async for m in channel.history(limit=50, oldest_first=True):
+            if (m.author == client.user and m.content.startswith("👋 Ini tempat diskusi")
+                    and m.embeds and m.embeds[0].footer.text == config.SERVER_NAME):
                 msg = m
                 break
         if msg is None:
             msg = await channel.send(text, embed=embed)
-        elif not msg.embeds or not msg.embeds[0].image or msg.embeds[0].footer.text != config.SERVER_NAME:
-            msg = await msg.edit(content=text, embed=embed)
         if not msg.pinned:
             await msg.pin(reason="Minhub: pesan pembuka campaign")
         intro_done.add(channel.id)
