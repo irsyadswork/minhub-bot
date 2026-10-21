@@ -42,6 +42,21 @@ HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar 
 GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"]
 GEMINI_TIMEOUT = 15                    # detik per percobaan
 
+# --- Share konten meledak dari laporan client (sekali sehari per campaign, tag @everyone) ---
+# slug campaign di website -> kode laporan (bagian terakhir link laporan.clipperhub.site/laporan/<kode>)
+REPORTS = {
+    "menang-untuk-kalah-sound-of-panca": "chxsopan-3j5zdys01m",
+    "jujutsu-kaisen-run-indonesia": "jujutsu-kaisen-fun-run-indonesia-v982l59ono",
+    "film-siti-si-vampir-batch-4": "cpfssv4-1jamscke56",
+    "internet-rakyat-sahabat-ira": "cpsahabatirach-pis58g8xbm",
+    "ajaib-cuantalks": "ajaib-cuantalks-batch-5-bnw8d25be6",
+    "film-pasukan-1000-janda": "cpfseribujanda3-g7losqt2s0",
+}
+VIRAL_POST_HOUR = 19                   # jam (WIB) mulai share tiap hari
+VIRAL_MIN_VIEWS = 100_000              # minimal views normal
+VIRAL_FALLBACK_MIN_VIEWS = 20_000      # minimal views kalau sudah lama nggak ada yang tembus 100rb
+VIRAL_STUCK_DAYS = 3                   # "lama" = berapa hari nggak ada yang tembus 100rb
+
 # --- Pengumuman campaign baru ---
 CAMPAIGN_CHECK_MINUTES = 3
 CAMPAIGN_TEXT = "🚨 **Campaign baru drop, guys!** Gas join sebelum slotnya penuh 👇"

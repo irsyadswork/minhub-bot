@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 import config
 from ai import Brain
 from campaigns import CampaignWatcher
+from viral import ViralSharer
 from welcome_card import make_welcome_card
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +46,7 @@ client = discord.Client(intents=detect_intents(os.environ["DISCORD_TOKEN"]))
 with open(os.path.join(HERE, "faq.md"), encoding="utf-8") as f:
     brain = Brain(os.environ["GEMINI_API_KEY"], f.read())
 watcher = CampaignWatcher()
+viral = ViralSharer()
 
 FALLBACK = "Waduh otakku lagi nge-lag bentar 😵‍💫 {admin} tolong bantu jawab yaa"
 QUESTION_HINT = re.compile(
@@ -205,6 +207,8 @@ async def on_ready():
         await sync_guild(guild)
     if not campaign_loop.is_running():
         campaign_loop.start()
+    if not viral_loop.is_running():
+        viral_loop.start()
 
 
 @client.event
@@ -384,6 +388,29 @@ async def campaign_loop():
                 text += f"\n💬 Diskusi: {channels[c['slug']].mention}"
             await channel.send(text, embed=embed)
             log.info("Umumkan campaign baru: %s", c["slug"])
+
+
+@tasks.loop(minutes=10)
+async def viral_loop():
+    """Sekali sehari (mulai VIRAL_POST_HOUR WIB): share konten paling meledak ke tiap channel campaign."""
+    if not viral.due():
+        return
+    for guild in client.guilds:
+        channels = campaign_channels(guild)
+        for slug, token in config.REPORTS.items():
+            campaign = watcher.get(slug)
+            channel = channels.get(slug)
+            if not campaign or campaign.get("status", "aktif") != "aktif" or not channel:
+                continue
+            try:
+                rec = await viral.pick(slug, token)
+            except Exception:
+                log.exception("Gagal baca laporan %s", slug)
+                continue
+            if rec:
+                await channel.send(viral.message(campaign, rec),
+                                   allowed_mentions=discord.AllowedMentions(everyone=True))
+                log.info("Share konten meledak %s: %s views", slug, rec.get("views"))
 
 
 if __name__ == "__main__":

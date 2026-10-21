@@ -1,6 +1,7 @@
 # Rahasia & data runtime - jangan ikut ke GitHub
 .env
 seen_campaigns.json
+viral_state.json
 
 # Sampah lokal
 __pycache__/
