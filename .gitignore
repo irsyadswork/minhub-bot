@@ -1,0 +1,10 @@
+# Rahasia & data runtime - jangan ikut ke GitHub
+.env
+seen_campaigns.json
+
+# Sampah lokal
+__pycache__/
+*.pyc
+.venv/
+preview_welcome.png
+.local/
