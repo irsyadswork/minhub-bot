@@ -51,8 +51,8 @@ SITUASI_TAG = """SITUASI: Member nge-tag kamu langsung, jadi kamu WAJIB menjawab
 SITUASI_NIMBRUNG = """SITUASI: Pesan ini TIDAK menyebut kamu. Kamu cuma standby di channel.
 Set "jawab": true HANYA kalau pesan terbaru adalah pertanyaan/kebingungan yang belum terjawab soal campaign,
 brief, aturan, hashtag, views, deadline, upload, pembayaran/pencairan, atau cara clipping.
-Set "jawab": false kalau: basa-basi, candaan, curhat, ngobrol santai antar member, pertanyaan yang ditujukan ke
-orang tertentu, sudah dijawab member lain di obrolan, atau kamu ragu. Lebih baik diam daripada nimbrung nggak penting."""
+Set "jawab": false kalau: basa-basi, candaan, curhat, ngobrol santai antar member, pengumuman/info dari admin,
+pertanyaan yang ditujukan ke orang tertentu, sudah dijawab member lain di obrolan, atau kamu ragu. Lebih baik diam daripada nimbrung nggak penting."""
 
 COMMAND_PROMPT = PERSONA + """
 

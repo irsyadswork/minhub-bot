@@ -250,7 +250,7 @@ async def on_message(message: discord.Message):
         # Mode nimbrung: cuma di #diskusi & channel campaign, cuma kalau kelihatan kayak pertanyaan.
         if not (config.AUTO_REPLY and client.intents.message_content and (slug or general)):
             return
-        if is_admin(message.author) or isinstance(ref, discord.Message):  # admin ngobrol / lagi bales orang lain
+        if isinstance(ref, discord.Message):  # lagi bales orang lain
             return
         if len(message.content) < 8 or not QUESTION_HINT.search(message.content.lower()):
             return
