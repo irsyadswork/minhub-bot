@@ -189,6 +189,7 @@ async def sync_guild(guild: discord.Guild):
                     overwrites=public_overwrites(guild), reason=f"Minhub: diskusi campaign {c['slug']}")
                 existing[c["slug"]] = ch
                 log.info("Bikin channel #%s", ch.name)
+                await ensure_intro(ch, c, tag_everyone=True)  # campaign baru: kabari semua member
         except discord.Forbidden:
             log.warning("Minhub belum punya izin Manage Channels / Manage Roles, channel nggak bisa dibuat otomatis")
             return
@@ -202,18 +203,21 @@ async def sync_guild(guild: discord.Guild):
 intro_done: set[int] = set()
 
 
-async def ensure_intro(channel: discord.TextChannel, c: dict):
+async def ensure_intro(channel: discord.TextChannel, c: dict, tag_everyone: bool = False):
     """Pastikan pesan pembuka campaign (versi dengan banner) ada dan di-pin."""
     text, embed = watcher.intro(c)
+    if tag_everyone:
+        text = "@everyone " + text
     msg = None
     try:
         async for m in channel.history(limit=50, oldest_first=True):
-            if (m.author == client.user and m.content.startswith("👋 Ini tempat diskusi")
+            if (m.author == client.user and "👋 Ini tempat diskusi" in m.content
                     and m.embeds and m.embeds[0].footer.text == config.SERVER_NAME):
                 msg = m
                 break
         if msg is None:
-            msg = await channel.send(text, embed=embed)
+            msg = await channel.send(text, embed=embed,
+                                     allowed_mentions=discord.AllowedMentions(everyone=tag_everyone))
         if not msg.pinned:
             await msg.pin(reason="Minhub: pesan pembuka campaign")
         intro_done.add(channel.id)
