@@ -60,10 +60,14 @@ DEADLINE_H1 = [
     "Deadline **{title}** besok ({deadline}). Kalau masih ada klip yang mau dikirim, kejar hari ini ya.",
     "Besok ({deadline}) campaign **{title}** udah tutup. Yang belum upload, masih ada waktu hari ini.",
 ]
+# Dikirim (dengan @everyone) cuma setelah admin/mentor setuju di #minhub-control
 DEADLINE_H = [
     "Hari ini hari terakhir **{title}** ({deadline}). Pastikan klip kamu udah ke-submit sebelum tutup ya 🙏",
     "Deadline **{title}** hari ini. Yang masih nyimpen draft, sekarang waktunya upload.",
 ]
+DEADLINE_ASK = ("{roles} Hari ini **{title}** udah deadline ({deadline}). Mau extend atau closed sesuai deadline?\n"
+                "React ✅ = closed sesuai deadline, aku umumin hari terakhir di {channel} + tag @everyone.\n"
+                "React 🔁 = extend. Ubah deadline-nya di website, nanti perubahannya aku kabari otomatis di {channel}.")
 
 # --- Status budget ---
 BUDGET_RED = ("Budget campaign **{title}** udah habis, jadi klip baru nggak akan dibayar lagi. "

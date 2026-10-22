@@ -19,6 +19,7 @@ CAMPAIGN_CHANNEL_ID = 1458784634463846585  # #pengumuman
 RULES_CHANNEL_ID = 1457960457251065877     # #rules
 CAMPAIGN_CATEGORY_ID = 1562391140551102514 # kategori "Diskusi Campaign"
 ADMIN_ROLE_ID = 1458782103377412293        # role Admin Komunitas
+MENTOR_ROLE_ID = 1457969049207312521       # role Mentor (ikut di-tag & boleh setujui pengumuman deadline)
 
 # --- Channel (nama cadangan) ---
 WELCOME_CHANNEL = "welcome"            # tempat kartu welcome dikirim
@@ -87,7 +88,8 @@ CAMPAIGN_CHECK_MINUTES = 3
 # --- Status budget di nama channel campaign + update campaign ---
 STATUS_CHECK_MINUTES = 30              # cek sisa budget & perubahan data campaign
 BUDGET_YELLOW_PCT = 5                  # sisa > 0% s/d 5% = 🟡, di atas itu 🟢, 0% = 🔴
-DEADLINE_REMINDER_HOUR = 9             # jam (WIB) kirim pengingat deadline H-1 dan hari H
+DEADLINE_REMINDER_HOUR = 9             # jam (WIB) kirim pengingat deadline H-1, dan tanya admin di hari H
+                                       # (hari H: umumkan "hari terakhir" + @everyone cuma setelah admin/mentor react ✅)
 
 # --- Pengingat harian di #diskusi-general ---
 DAILY_REMINDER_HOUR = 17               # jam (WIB). Aktif setelah admin react ✅ di preview di #minhub-control

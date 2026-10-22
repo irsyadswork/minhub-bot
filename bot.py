@@ -728,15 +728,19 @@ async def preview_and_send(message: discord.Message, text: str, source, target):
 
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    """Admin react ✅ di preview pengingat harian -> pengingat aktif."""
-    if payload.user_id == client.user.id or str(payload.emoji) != "✅":
+    """Admin react ✅ di preview pengingat harian -> pengingat aktif. Juga jawaban pertanyaan deadline hari H."""
+    if payload.user_id == client.user.id or not payload.guild_id:
+        return
+    guild = client.get_guild(payload.guild_id)
+    member = payload.member or (guild.get_member(payload.user_id) if guild else None)
+    if await answer_deadline(payload, member, guild):
+        return
+    if str(payload.emoji) != "✅":
         return
     state = store.load("bot_state.json", {})
     daily = state.get("daily") or {}
     if daily.get("enabled") or payload.message_id != daily.get("preview_id"):
         return
-    guild = client.get_guild(payload.guild_id) if payload.guild_id else None
-    member = payload.member or (guild.get_member(payload.user_id) if guild else None)
     if not is_admin(member):
         return
     now = store.now_wib()
@@ -917,15 +921,70 @@ async def status_loop():
                 days = (datetime.date.fromisoformat(c.get("deadline")) - now.date()).days
             except (TypeError, ValueError):
                 continue
-            key = {1: "H-1", 0: "H"}.get(days)
+            key = {1: "H-1", 0: "H-tanya"}.get(days)
             done = sent.setdefault(c["slug"], [])
             if not ch or not key or f"{key}:{c.get('deadline')}" in done:
                 continue
             facts = watcher.announce_facts(c)
             done.append(f"{key}:{c.get('deadline')}")
             store.save("campaign_state.json", state)  # catat dulu biar nggak kekirim dobel kalau ada error
-            await send(ch, random.choice(texts.DEADLINE_H1 if key == "H-1" else texts.DEADLINE_H).format(**facts))
-            store.event("deadline_reminder_sent", slug=c["slug"], reminder=key)
+            if key == "H-1":
+                msg = await send(ch, random.choice(texts.DEADLINE_H1).format(**facts))
+                store.event("deadline_reminder_sent", slug=c["slug"], reminder=key)
+                log.info("Pengingat deadline H-1 %s: %s", c["slug"], msg.jump_url)
+            else:
+                await ask_deadline(guild, c, ch)
+
+
+async def ask_deadline(guild: discord.Guild, c: dict, channel):
+    """Hari H: jangan langsung umumin. Tanya admin & mentor dulu di channel kontrol: extend atau closed?"""
+    ctl = control_channel(guild)
+    if not ctl:
+        return
+    roles = [r for r in (admin_role(guild), guild.get_role(config.MENTOR_ROLE_ID)) if r]
+    facts = watcher.announce_facts(c)
+    msg = await send(ctl, texts.DEADLINE_ASK.format(roles=" ".join(r.mention for r in roles) or "Admin",
+                                                    channel=channel.mention, **facts), roles=True, raw=True)
+    await msg.add_reaction("✅")
+    await msg.add_reaction("🔁")
+    state = store.load("campaign_state.json", {})
+    state.setdefault("deadline_ask", {})[str(msg.id)] = {"slug": c["slug"], "channel_id": channel.id,
+                                                       "deadline": c.get("deadline")}
+    store.save("campaign_state.json", state)
+    store.event("deadline_ask_sent", slug=c["slug"])
+    log.info("Tanya admin soal deadline %s: %s", c["slug"], msg.jump_url)
+
+
+async def answer_deadline(payload: discord.RawReactionActionEvent, member, guild) -> bool:
+    """Admin/mentor react di pertanyaan deadline: ✅ umumkan hari terakhir + @everyone, 🔁 tunggu deadline baru."""
+    state = store.load("campaign_state.json", {})
+    ask = (state.get("deadline_ask") or {}).get(str(payload.message_id))
+    emoji = str(payload.emoji)
+    if not ask or emoji not in ("✅", "🔁"):
+        return bool(ask)
+    mentor = guild.get_role(config.MENTOR_ROLE_ID) if guild else None
+    if not (is_admin(member) or (mentor and mentor in getattr(member, "roles", []))):
+        return True
+    state["deadline_ask"].pop(str(payload.message_id))
+    store.save("campaign_state.json", state)
+    c = watcher.get(ask["slug"]) or {"slug": ask["slug"], "title": ask["slug"], "deadline": ask["deadline"]}
+    channel = guild.get_channel(ask["channel_id"])
+    ctl = control_channel(guild)
+    store.activity(kind="deadline_decision", user=str(member), user_id=member.id, slug=ask["slug"],
+                   decision="closed" if emoji == "✅" else "extend")
+    if emoji == "🔁":
+        await send(ctl, f"Siap, **{c.get('title')}** di-extend. Ubah deadline-nya di website ya, nanti aku kabari "
+                        f"perubahannya di {channel.mention if channel else 'channel campaign'}.")
+        return True
+    if not channel:
+        await send(ctl, f"Channel campaign **{c.get('title')}** nggak ketemu, pengumuman batal.")
+        return True
+    text = random.choice(texts.DEADLINE_H).format(**watcher.announce_facts(c)) if watcher.get(ask["slug"]) \
+        else f"Hari ini hari terakhir **{c.get('title')}**."
+    msg = await send(channel, "@everyone " + text, everyone=True)
+    store.event("deadline_reminder_sent", slug=ask["slug"], reminder="H")
+    await send(ctl, f"Oke, {member.display_name} setuju closed sesuai deadline. Udah aku umumin: {msg.jump_url}")
+    return True
 
     store.save("campaign_state.json", state)
 
