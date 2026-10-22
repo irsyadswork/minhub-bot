@@ -190,12 +190,13 @@ async def prepare(text: str, max_embeds: int = 2) -> tuple[str, list[discord.Emb
             continue
         host = urlparse(url).hostname or url
         site = config.CAMPAIGN_SITE.split("//", 1)[-1]
+        img = await _site_image(url) if site in host else None
+        if not img:
+            continue  # tanpa gambar valid, cukup link polos (kartu kosong malah jelek)
         title = info.get("title") or ("Clipper Hub Campaigns" if site in host else host)
         embed = discord.Embed(title=title[:256], url=url, description=(info.get("description") or "")[:300] or None,
                               color=0x488CFF)
-        img = await _site_image(url) if site in host else None
-        if img:
-            embed.set_image(url=img)
+        embed.set_image(url=img)
         embed.set_footer(text=config.SERVER_NAME)
         embeds.append(embed)
     return text, embeds

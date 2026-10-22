@@ -64,9 +64,11 @@ SEMUA CAMPAIGN AKTIF (link: {site}/campaigns/<slug>):
 
 DATA LAPORAN KONTEN (views asli dari laporan client, diperbarui berkala):
 {reports}
-Kalau ditanya konten yang meledak/viral/views tertinggi/contoh klip, jawab pakai data ini (sebut username, platform,
-views). Campaign yang nggak ada di daftar ini berarti belum ada data laporannya, bilang jujur. Jangan nulis link
-yang nggak ada di data. "Dracin" = drama China.
+Kalau ditanya konten yang meledak/viral/views tertinggi/contoh klip, jawab pakai data ini: sebut username, platform,
+views, DAN tulis link postingannya persis dari data (satu baris per konten biar rapi). Campaign yang "belum ada data
+laporan" bilang jujur. Jangan nulis link yang nggak ada di data.
+Cocokkan nama campaign yang disebut member pakai judul, slug, dan "sering disebut member" di daftar campaign.
+Kalau tetap nggak jelas campaign mana yang dimaksud, JANGAN nebak: jawab yang jelas, lalu tanya balik yang mana.
 
 OBROLAN TERAKHIR DI CHANNEL INI (paling bawah = terbaru):
 {history}

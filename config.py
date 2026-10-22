@@ -73,7 +73,17 @@ REPORTS = {
     "ajaib-cuantalks": "ajaib-cuantalks-batch-5-bnw8d25be6",
     "film-pasukan-1000-janda": "cpfseribujanda3-g7losqt2s0",
 }
-VIRAL_POST_HOUR = 19                   # jam (WIB) mulai share tiap hari
+# Nama panggilan campaign yang biasa dipakai member (slug -> alias). Kalau tetap ambigu, Minhub nanya balik.
+CAMPAIGN_ALIASES = {
+    "semanis-drama-tropicana-slim": ["dracin", "drama china", "semanis", "tropicana", "istri kontrak"],
+    "film-siti-si-vampir-batch-4": ["siti", "ssv", "vampir"],
+    "film-pasukan-1000-janda": ["1000 janda", "seribu janda", "pasukan janda"],
+    "menang-untuk-kalah-sound-of-panca": ["panca", "menang untuk kalah"],
+    "jujutsu-kaisen-run-indonesia": ["jjk", "jujutsu", "fun run"],
+    "internet-rakyat-sahabat-ira": ["ira", "sahabat ira", "internet rakyat"],
+    "ajaib-cuantalks": ["ajaib", "cuantalks"],
+}
+VIRAL_POST_HOUR = 19                  # jam (WIB) mulai share tiap hari
 VIRAL_MIN_VIEWS = 100_000              # minimal views normal
 VIRAL_FALLBACK_MIN_VIEWS = 20_000      # minimal views kalau sudah lama nggak ada yang tembus 100rb
 VIRAL_STUCK_DAYS = 3                   # "lama" = berapa hari nggak ada yang tembus 100rb

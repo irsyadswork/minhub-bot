@@ -67,9 +67,9 @@ class ViralSharer:
         return recs
 
     async def top_summary(self, titles: dict, per_campaign: int = 3) -> str:
-        """Ringkasan konten views tertinggi per campaign dari laporan client, buat konteks AI.
-        Link cuma ditulis untuk konten yang sudah pernah di-acc admin; yang pernah diganti admin nggak ikut."""
-        lines = []
+        """Ringkasan konten views tertinggi per campaign dari laporan client (dengan link), buat konteks AI.
+        Konten yang pernah diganti admin (curiga curang / link mati) nggak ikut."""
+        lines = [f"- {title}: belum ada data laporan" for slug, title in titles.items() if slug not in config.REPORTS]
         for slug, token in config.REPORTS.items():
             if slug not in titles:
                 continue
@@ -79,7 +79,7 @@ class ViralSharer:
                 lines.append(f"- {titles[slug]}: (laporan lagi nggak bisa diambil)")
                 continue
             st = self._st(slug)
-            rejected, shared = set(st["rejected"]), set(st["shared"])
+            rejected = set(st["rejected"])
             top = sorted((r for r in recs if r.get("link") and r["link"] not in rejected),
                          key=lambda r: r.get("views") or 0, reverse=True)[:per_campaign]
             if not top:
@@ -88,11 +88,9 @@ class ViralSharer:
             parts = []
             for r in top:
                 platform = str(r.get("platform") or "-")
-                part = (f"@{str(r.get('username') or 'clipper').lstrip('@')} "
-                        f"({PLATFORM_NAMES.get(platform.lower(), platform)}) {_views(int(r.get('views') or 0))} views")
-                if r["link"] in shared:
-                    part += f" {r['link']}"
-                parts.append(part)
+                parts.append(f"@{str(r.get('username') or 'clipper').lstrip('@')} "
+                             f"({PLATFORM_NAMES.get(platform.lower(), platform)}) "
+                             f"{_views(int(r.get('views') or 0))} views {r['link']}")
             lines.append(f"- {titles[slug]}: total {len(recs)} konten; teratas: " + "; ".join(parts))
         return "\n".join(lines)
 

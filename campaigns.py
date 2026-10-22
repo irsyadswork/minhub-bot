@@ -205,6 +205,8 @@ class CampaignWatcher:
                 f"- {c.get('title')} (slug: {c['slug']}) | brand {c.get('brand')} | {c.get('category')} | "
                 f"{_rupiah(c.get('rate'))}/1K views | deadline {_tanggal(c.get('deadline'))} | "
                 f"platform: {', '.join(c.get('platforms') or [])} | tagline: {c.get('tagline')}"
+                + (f" | sering disebut member: {', '.join(config.CAMPAIGN_ALIASES[c['slug']])}"
+                   if c["slug"] in config.CAMPAIGN_ALIASES else "")
             )
         return "\n".join(lines)
 
