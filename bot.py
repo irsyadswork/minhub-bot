@@ -59,13 +59,13 @@ viral = ViralSharer()
 linkpreview.set_poster_lookup(lambda slug: watcher.poster(watcher.get(slug)) if watcher.get(slug) else None)
 
 FALLBACK = "Waduh, aku lagi error bentar 😅 {admin} tolong bantu jawab ya."
-RATE_LIMITED = "Pelan-pelan dulu ya, aku jawab satu-satu 😅"
+RATE_LIMITED = "Pelan-pelan dulu ya kak, aku jawab satu-satu 😅"
 STYLES = ["buka dengan pertanyaan santai", "buka langsung ke intinya", "nada kagum tapi kalem",
           "nada ngajak belajar bareng", "kalimat pendek-pendek", "sedikit bercanda", "kayak ngobrol sama temen"]
 INJECTION_REPLIES = [
-    "Yang itu rahasia dapur wkwk. Mending tanya soal clipping atau campaign aja.",
-    "Hmm, itu nggak bisa aku kasih ya. Ada yang mau ditanya soal campaign?",
-    "Skip yang itu ya 😅 kalau soal clipping, aku siap bantu.",
+    "Yang itu rahasia dapur wkwk, maaf ya kak. Kalau soal clipping atau campaign, aku siap bantu kok",
+    "Hehe itu nggak bisa aku kasih ya kak. Ada yang mau ditanyain soal campaign?",
+    "Skip yang itu ya kak 😅 kalau soal clipping, tanya aja",
 ]
 # Pesan error lama dari Minhub: jangan dibaca ulang sebagai konteks obrolan.
 ERROR_HINTS = ("otakku error", "otakku lagi nge-lag", "lagi error bentar", "lagi rame banget", "gagal proses perintah",
@@ -537,7 +537,7 @@ async def passes_security(message: discord.Message, base, mentioned: bool) -> bo
         await alert(f"Aktivitas mencurigakan: {author.mention} kayaknya nyoba ngorek data internal/prompt di "
                     f"{base.mention}:\n> {message.content[:300]}", key=f"inj:{author.id}")
         if mentioned:
-            await send(message.channel, random.choice(INJECTION_REPLIES), reference=message)
+            await send(message.channel, friendly(random.choice(INJECTION_REPLIES), author), reference=message)
         return False
 
     if rate_check(author.id):
@@ -551,7 +551,7 @@ async def passes_security(message: discord.Message, base, mentioned: bool) -> bo
                    text=message.content[:200])
     if mentioned and now - _warned.get(author.id, -1e9) > 300:
         _warned[author.id] = now
-        await send(message.channel, RATE_LIMITED, reference=message)
+        await send(message.channel, friendly(RATE_LIMITED, author), reference=message)
     if len(blocked) >= 5:
         await alert(f"Aktivitas mencurigakan: {author.mention} nge-spam pertanyaan ke aku di {base.mention} "
                     f"({len(blocked)}x kena rate limit dalam 10 menit).", key=f"spam:{author.id}")
@@ -586,10 +586,22 @@ async def deliver(message: discord.Message, base, result: dict, mentions: dict, 
     log.info("[%s/%s] %s: %s", result["kategori"], kind, message.author, message.content[:80])
     store.activity(kind=kind, user=str(message.author), user_id=message.author.id, channel=base.name,
                    text=message.content[:200], result=result["kategori"])
-    sent = await send(message.channel, fill_mentions(result["balasan"], mentions), reference=message,
-                      users=True, roles=True)
+    # Tag balik penanya cuma kalau jawabannya telat (dari antrean / lewat 2 menit), biar nggak berasa bot banget
+    late = kind.endswith("antrian") or (discord.utils.utcnow() - message.created_at).total_seconds() > 120
+    sent = await send(message.channel, friendly(fill_mentions(result["balasan"], mentions), message.author, tag=late),
+                      reference=message, users=True, roles=True)
     if result["kategori"] == "error":
         error_msgs.add(sent.id)
+
+
+def friendly(text: str, author, tag: bool = False) -> str:
+    """Balasan ke member: kalimat terakhir nggak ditutup titik biar nggak kesan jutek; tag penanya kalau diminta."""
+    text = text.strip()
+    if text.endswith(".") and not text.endswith(".."):
+        text = text[:-1]
+    if tag and author.mention not in text and f"<@!{author.id}>" not in text:
+        text = f"{author.mention} {text}"
+    return text
 
 
 def queue_question(message: discord.Message, reason: str):
