@@ -7,6 +7,7 @@ bot_state.json
 campaign_state.json
 deadline_state.json
 viral_pending.json
+question_queue.json
 .viral_cache/
 events.jsonl
 activity.jsonl

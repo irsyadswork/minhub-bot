@@ -53,7 +53,7 @@ HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar 
 
 # --- AI ---
 # Dicoba berurutan: kalau model pertama lambat/overload, otomatis pindah ke berikutnya.
-GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"]
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]
 GEMINI_TIMEOUT = 15                    # detik per percobaan
 GEMINI_RETRIES = 1                     # kena 503/429/timeout: coba ulang sekian kali sebelum pindah model
 GEMINI_RETRY_DELAY = 2                 # detik jeda sebelum coba ulang

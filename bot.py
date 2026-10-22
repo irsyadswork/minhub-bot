@@ -59,7 +59,6 @@ viral = ViralSharer()
 linkpreview.set_poster_lookup(lambda slug: watcher.poster(watcher.get(slug)) if watcher.get(slug) else None)
 
 FALLBACK = "Waduh, aku lagi error bentar 😅 {admin} tolong bantu jawab ya."
-BUSY = "Lagi rame banget yang nanya nih, coba tanya lagi semenit lagi ya 🙏"
 RATE_LIMITED = "Pelan-pelan dulu ya, aku jawab satu-satu 😅"
 STYLES = ["buka dengan pertanyaan santai", "buka langsung ke intinya", "nada kagum tapi kalem",
           "nada ngajak belajar bareng", "kalimat pendek-pendek", "sedikit bercanda", "kayak ngobrol sama temen"]
@@ -429,7 +428,9 @@ async def on_ready():
         log.exception("Gagal ambil data campaign")
     for guild in client.guilds:
         await sync_guild(guild)
-    for loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, heartbeat_loop):
+        await recover_unanswered(guild)
+    for loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, heartbeat_loop,
+                 question_queue_loop):
         if not loop.is_running():
             loop.start()
 
@@ -557,62 +558,152 @@ async def passes_security(message: discord.Message, base, mentioned: bool) -> bo
     return False
 
 
-async def respond(message: discord.Message, base, slug, mentioned: bool):
-    previous = last_auto_reply.get(base.id, 0)
-    if not mentioned:
-        last_auto_reply[base.id] = time.monotonic()  # tahan dulu biar nggak dobel
+QUESTION_QUEUE = "question_queue.json"  # pertanyaan yang belum bisa dijawab karena Gemini penuh/error
+QUEUE_MAX_HOURS = 3                      # lewat dari ini nyerah: minta admin bantu jawab
 
+
+async def ask_ai(message: discord.Message, base, slug, mentioned: bool) -> tuple[dict, dict]:
+    """Minta jawaban ke Gemini. Balikin (hasil, mentions)."""
     question = re.sub(rf"<@!?{client.user.id}>", "", message.content).strip() or "(cuma nge-tag kamu tanpa pertanyaan)"
     campaign = watcher.get(slug) if slug else None
     refs, mentions = build_refs(message.guild, campaign)
     history = await recent_history(message)
+    try:
+        reports = await viral.top_summary({c["slug"]: c.get("title") for c in watcher.campaigns})
+    except Exception as e:
+        log.warning("Gagal ambil ringkasan laporan: %s", e)
+        reports = ""
+    result = await brain.reply(question, message.author.display_name, refs, watcher.summary(),
+                               watcher.detail(campaign) if campaign else "", history, mentioned, reports)
+    return result, mentions
+
+
+async def deliver(message: discord.Message, base, result: dict, mentions: dict, kind: str):
+    if LEAK.search(result["balasan"]):
+        await alert(f"Jawaban AI buat {message.author.mention} keliatan bocorin data internal, aku blokir.",
+                    key=f"leak:{message.author.id}")
+        result["balasan"] = random.choice(INJECTION_REPLIES)
+    log.info("[%s/%s] %s: %s", result["kategori"], kind, message.author, message.content[:80])
+    store.activity(kind=kind, user=str(message.author), user_id=message.author.id, channel=base.name,
+                   text=message.content[:200], result=result["kategori"])
+    sent = await send(message.channel, fill_mentions(result["balasan"], mentions), reference=message,
+                      users=True, roles=True)
+    if result["kategori"] == "error":
+        error_msgs.add(sent.id)
+
+
+def queue_question(message: discord.Message, reason: str):
+    """Gemini lagi penuh: jangan maksa jawab. Simpan dulu, dijawab otomatis begitu Gemini normal lagi."""
+    queue = store.load(QUESTION_QUEUE, [])
+    if any(q["message_id"] == message.id for q in queue):
+        return
+    queue.append({"channel_id": message.channel.id, "message_id": message.id,
+                  "t": store.now_wib().isoformat(timespec="seconds"), "reason": reason[:200]})
+    store.save(QUESTION_QUEUE, queue)
+
+
+async def respond(message: discord.Message, base, slug, mentioned: bool):
+    previous = last_auto_reply.get(base.id, 0)
+    if not mentioned:
+        last_auto_reply[base.id] = time.monotonic()  # tahan dulu biar nggak dobel
     kind = "question" if mentioned else "nimbrung"
 
     # Jeda humanis: total 5-60 detik. Diam dulu sebentar ("baca"), lalu "typing..." sampai waktunya habis.
     total = random.uniform(config.MIN_DELAY, config.MAX_DELAY)
     started_at = time.monotonic()
-    answer = asyncio.create_task(brain.reply(
-        question, message.author.display_name, refs, watcher.summary(),
-        watcher.detail(campaign) if campaign else "", history, mentioned))
+    answer = asyncio.create_task(ask_ai(message, base, slug, mentioned))
     await asyncio.sleep(min(total * 0.3, random.uniform(2, 8)))
 
     try:
-        result = await answer
+        result, mentions = await answer
     except Exception as e:
         busy = isinstance(e, AIBusy)
         log.warning("Gagal minta jawaban ke Gemini: %s", e)
         store.activity(kind=kind, user=str(message.author), user_id=message.author.id, channel=base.name,
-                       text=question[:200], result="busy" if busy else "error", reason=str(e)[:300])
-        await alert(f"Gagal jawab {message.author.mention} di {base.mention} "
-                    f"({'Gemini lagi penuh' if busy else 'error'}): `{str(e)[:400]}`",
-                    key="ai:busy" if busy else "ai:error")
-        if not mentioned:
+                       text=message.content[:200], result="busy" if busy else "error", reason=str(e)[:300])
+        if not mentioned:  # nimbrung: mending diam
             last_auto_reply[base.id] = previous
             return
-        result = {"jawab": True, "kategori": "busy" if busy else "error", "balasan": BUSY if busy else FALLBACK}
+        queue_question(message, str(e))
+        await alert(f"{'Gemini lagi penuh' if busy else 'Gemini error'}, pertanyaan {message.author.mention} di "
+                    f"{base.mention} aku antriin. Nanti aku jawab otomatis begitu Gemini normal lagi.\n"
+                    f"Detail: `{str(e)[:300]}`", key="ai:busy" if busy else "ai:error")
+        return
 
     if not result["jawab"] or not result["balasan"]:
         last_auto_reply[base.id] = previous
-        log.info("[skip] %s: %s", message.author, question[:80])
+        log.info("[skip] %s: %s", message.author, message.content[:80])
         return
-    if LEAK.search(result["balasan"]):
-        await alert(f"Jawaban AI buat {message.author.mention} keliatan bocorin data internal, aku blokir.",
-                    key=f"leak:{message.author.id}")
-        result["balasan"] = random.choice(INJECTION_REPLIES)
-    log.info("[%s%s] %s: %s", result["kategori"], "" if mentioned else "/nimbrung", message.author, question[:80])
-    store.activity(kind=kind, user=str(message.author), user_id=message.author.id, channel=base.name,
-                   text=question[:200], result=result["kategori"])
 
     async with message.channel.typing():
         remaining = total - (time.monotonic() - started_at)
         if remaining > 0:
             await asyncio.sleep(remaining)
-    sent = await send(message.channel, fill_mentions(result["balasan"], mentions), reference=message,
-                      users=True, roles=True)
-    if result["kategori"] in ("busy", "error"):
-        error_msgs.add(sent.id)
+    await deliver(message, base, result, mentions, kind)
     if not mentioned:
         last_auto_reply[base.id] = time.monotonic()
+
+
+@tasks.loop(minutes=2)
+async def question_queue_loop():
+    """Coba lagi jawab pertanyaan yang tertunda. Kalau Gemini masih penuh, berhenti dulu dan coba 2 menit lagi."""
+    queue = store.load(QUESTION_QUEUE, [])
+    if not queue:
+        return
+    guild = home_guild()
+    remaining = list(queue)
+    for q in queue:
+        channel = guild.get_channel_or_thread(q["channel_id"]) if guild else None
+        try:
+            message = await channel.fetch_message(q["message_id"]) if channel else None
+        except discord.HTTPException:
+            message = None
+        if not message:  # pesannya udah dihapus
+            remaining.remove(q)
+            continue
+        base = base_channel(message.channel)
+        age = (store.now_wib() - datetime.datetime.fromisoformat(q["t"])).total_seconds() / 3600
+        try:
+            result, mentions = await ask_ai(message, base, watcher.slug_from_topic(getattr(base, "topic", None)), True)
+        except AIBusy:
+            if age < QUEUE_MAX_HOURS:
+                break  # masih penuh, nggak usah maksa
+            result, mentions = {"jawab": True, "kategori": "error", "balasan": FALLBACK}, build_refs(guild)[1]
+        except Exception:
+            if age < QUEUE_MAX_HOURS:
+                continue
+            result, mentions = {"jawab": True, "kategori": "error", "balasan": FALLBACK}, build_refs(guild)[1]
+        remaining.remove(q)
+        store.save(QUESTION_QUEUE, remaining)
+        async with message.channel.typing():
+            await asyncio.sleep(random.uniform(3, 6))
+        await deliver(message, base, result, mentions, "question/antrian")
+    store.save(QUESTION_QUEUE, remaining)
+
+
+async def recover_unanswered(guild: discord.Guild, hours: int = 6):
+    """Pas nyala: cari mention ke Minhub yang belum kejawab (atau cuma dapet pesan error) lalu masukin antrean."""
+    since = discord.utils.utcnow() - datetime.timedelta(hours=hours)
+    channels = [general_channel(guild)] + list(campaign_channels(guild).values())
+    found = 0
+    for channel in filter(None, channels):
+        try:
+            messages = [m async for m in channel.history(limit=100, after=since)]
+        except discord.HTTPException:
+            continue
+        answered = {m.reference.message_id for m in messages
+                    if m.author == client.user and m.reference and not is_error_message(m)}
+        for m in messages:
+            if m.author.bot or m.id in answered:
+                continue
+            ref = m.reference.resolved if m.reference else None
+            if client.user in m.mentions or (isinstance(ref, discord.Message) and ref.author == client.user):
+                queue_question(m, "belum kejawab sebelum Minhub nyala")
+                found += 1
+    if found:
+        log.info("Ada %d pertanyaan belum kejawab, masuk antrean", found)
+        await alert(f"Ada {found} pertanyaan ke aku yang belum kejawab dalam {hours} jam terakhir, aku jawab sekarang.",
+                    cooldown=False)
 
 
 # ---------- perintah admin di #minhub-control ----------
@@ -1263,7 +1354,7 @@ async def heartbeat_loop():
     store.save("bot_state.json", state)
 
 
-for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop):
+for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop):
     @_loop.error
     async def _loop_error(exc, _l=_loop, _name=_loop.coro.__name__):
         """Tugas berkala yang error jangan sampai mati selamanya: lapor admin, nyalakan lagi 1 menit kemudian."""

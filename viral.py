@@ -36,6 +36,7 @@ def today_wib() -> date:
 
 class ViralSharer:
     def __init__(self):
+        self._cache: dict = {}
         self.state = {}
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, encoding="utf-8") as f:
@@ -55,6 +56,45 @@ class ViralSharer:
                 r.raise_for_status()
                 data = await r.json(content_type=None)
         return data.get("records") or []
+
+    async def records(self, token: str) -> list[dict]:
+        """Data laporan dengan cache 30 menit (dipakai buat jawab pertanyaan member)."""
+        hit = self._cache.get(token)
+        if hit and (datetime.now(WIB) - hit[0]).total_seconds() < 1800:
+            return hit[1]
+        recs = await self.fetch(token)
+        self._cache[token] = (datetime.now(WIB), recs)
+        return recs
+
+    async def top_summary(self, titles: dict, per_campaign: int = 3) -> str:
+        """Ringkasan konten views tertinggi per campaign dari laporan client, buat konteks AI.
+        Link cuma ditulis untuk konten yang sudah pernah di-acc admin; yang pernah diganti admin nggak ikut."""
+        lines = []
+        for slug, token in config.REPORTS.items():
+            if slug not in titles:
+                continue
+            try:
+                recs = await self.records(token)
+            except Exception:
+                lines.append(f"- {titles[slug]}: (laporan lagi nggak bisa diambil)")
+                continue
+            st = self._st(slug)
+            rejected, shared = set(st["rejected"]), set(st["shared"])
+            top = sorted((r for r in recs if r.get("link") and r["link"] not in rejected),
+                         key=lambda r: r.get("views") or 0, reverse=True)[:per_campaign]
+            if not top:
+                lines.append(f"- {titles[slug]}: belum ada konten di laporan")
+                continue
+            parts = []
+            for r in top:
+                platform = str(r.get("platform") or "-")
+                part = (f"@{str(r.get('username') or 'clipper').lstrip('@')} "
+                        f"({PLATFORM_NAMES.get(platform.lower(), platform)}) {_views(int(r.get('views') or 0))} views")
+                if r["link"] in shared:
+                    part += f" {r['link']}"
+                parts.append(part)
+            lines.append(f"- {titles[slug]}: total {len(recs)} konten; teratas: " + "; ".join(parts))
+        return "\n".join(lines)
 
     def _st(self, slug: str) -> dict:
         st = self.state.setdefault(slug, {"shared": [], "since": today_wib().isoformat(), "last_big": None,

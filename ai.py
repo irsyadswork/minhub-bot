@@ -62,6 +62,12 @@ FAQ SERVER:
 SEMUA CAMPAIGN AKTIF (link: {site}/campaigns/<slug>):
 {campaigns}
 
+DATA LAPORAN KONTEN (views asli dari laporan client, diperbarui berkala):
+{reports}
+Kalau ditanya konten yang meledak/viral/views tertinggi/contoh klip, jawab pakai data ini (sebut username, platform,
+views). Campaign yang nggak ada di daftar ini berarti belum ada data laporannya, bilang jujur. Jangan nulis link
+yang nggak ada di data. "Dracin" = drama China.
+
 OBROLAN TERAKHIR DI CHANNEL INI (paling bawah = terbaru):
 {history}
 
@@ -198,7 +204,7 @@ class Brain:
         return dict(bot=config.BOT_NAME, server=config.SERVER_NAME, site=config.CAMPAIGN_SITE)
 
     async def reply(self, question: str, author: str, refs: dict, campaigns: str,
-                    channel_context: str = "", history: str = "", mentioned: bool = True) -> dict:
+                    channel_context: str = "", history: str = "", mentioned: bool = True, reports: str = "") -> dict:
         """refs: placeholder -> deskripsi, contoh {"{admin}": "tim admin", "{brief}": "halaman brief campaign"}."""
         ref_text = ", ".join(f"{desc} ({key})" for key, desc in refs.items()) or "admin server (sebut saja 'admin')"
         system = REPLY_PROMPT.format(
@@ -209,6 +215,7 @@ class Brain:
             faq=self.faq,
             channel_context=channel_context or "CHANNEL INI: diskusi umum (bukan khusus satu campaign).",
             campaigns=campaigns or "(data campaign belum tersedia)",
+            reports=reports or "(belum ada data laporan)",
             history=history or "(belum ada)",
         )
         data = await self._ask(system, f"Pesan terbaru dari {author}:\n{question}", 0.8 if mentioned else 0.4)
