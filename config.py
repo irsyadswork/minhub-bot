@@ -72,6 +72,7 @@ REPORTS = {
     "internet-rakyat-sahabat-ira": "cpsahabatirach-pis58g8xbm",
     "ajaib-cuantalks": "ajaib-cuantalks-batch-5-bnw8d25be6",
     "film-pasukan-1000-janda": "cpfseribujanda3-g7losqt2s0",
+    "semanis-drama-tropicana-slim": "istrikontrakxceodinginn-ccajrjyq3o",
 }
 # Nama panggilan campaign yang biasa dipakai member (slug -> alias). Kalau tetap ambigu, Minhub nanya balik.
 CAMPAIGN_ALIASES = {
