@@ -103,7 +103,7 @@ class ViralSharer:
     def done_today(self, slug: str) -> bool:
         return self._st(slug)["last_day"] == today_wib().isoformat()
 
-    async def candidates(self, slug: str, token: str) -> list[dict]:
+    async def candidates(self, slug: str, token: str, minimum: int | None = None) -> list[dict]:
         """Konten yang layak diusulkan hari ini, views terbesar dulu. Yang sudah pernah di-share atau pernah
         diganti admin (misal curiga suntik views / link mati) nggak ikut."""
         st = self._st(slug)
@@ -112,7 +112,8 @@ class ViralSharer:
                          key=lambda r: r.get("views") or 0, reverse=True)
         stuck_since = date.fromisoformat(st["last_big"] or st["since"])
         stuck = (today_wib() - stuck_since).days >= config.VIRAL_STUCK_DAYS
-        minimum = config.VIRAL_FALLBACK_MIN_VIEWS if stuck else config.VIRAL_MIN_VIEWS
+        if minimum is None:
+            minimum = config.VIRAL_FALLBACK_MIN_VIEWS if stuck else config.VIRAL_MIN_VIEWS
         return [r for r in records if (r.get("views") or 0) >= minimum]
 
     def mark_posted(self, slug: str, rec: dict):

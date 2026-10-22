@@ -118,10 +118,17 @@ JANGAN mengarang angka):
 PERTANYAAN DEADLINE YANG KAMU AJUKAN & BELUM DIJAWAB (kamu nanya ke atasan: campaign ini mau di-extend atau closed):
 {deadlines}
 
+DAFTAR CAMPAIGN (slug: judul | sering disebut):
+{campaigns}
+
 USULAN KONTEN VIRAL (TOP VIEWS) YANG NUNGGU ACC ADMIN:
 {virals}
 
 Tugasmu, pilih satu "aksi":
+- "cek_viral": admin minta cek/cari/provide konten top views dari laporan sekarang dan preview usulannya (misal
+  "cek top views semua campaign", "hari ini belum share top konten, provide dulu", "cariin konten paling rame buat
+  siti"). Isi "keputusan" dengan list {{"slug": ...}} kalau admin nyebut campaign tertentu (slug dari daftar campaign
+  di bawah), atau list kosong kalau semua campaign. Kamu PUNYA akses ke data laporan lewat aksi ini.
 - "viral": pesan admin menjawab usulan konten viral di atas. Isi "keputusan" berupa list, satu item per usulan:
   {{"id": persis dari daftar di atas, "keputusan": "kirim" (acc/oke/gas/share aja, termasuk "share tanpa embed"),
   "ganti" (minta konten lain, misal link mati/curiga suntik views/curang), "skip" (jangan kirim hari ini), atau
@@ -144,7 +151,7 @@ Tugasmu, pilih satu "aksi":
 - "balas": ngobrol biasa atau tanya (termasuk rekap), jawab di "balasan".
 Jangan pernah tulis @everyone atau @here di "pesan".
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"cek_viral"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
@@ -241,7 +248,8 @@ class Brain:
         }
 
     async def command(self, text: str, n_attachments: int, mentioned: str, history: str,
-                      draft: str, recap: str, deadlines: str = "", replied: str = "", virals: str = "") -> dict:
+                      draft: str, recap: str, deadlines: str = "", replied: str = "", virals: str = "",
+                      campaigns: str = "") -> dict:
         system = COMMAND_PROMPT.format(
             **self._base(),
             mentioned=mentioned or "(tidak ada)",
@@ -252,6 +260,7 @@ class Brain:
             deadlines=deadlines or "(tidak ada)",
             replied=replied or "(admin nggak lagi me-reply pesan kamu)",
             virals=virals or "(tidak ada)",
+            campaigns=campaigns or "(belum ada data)",
             year=datetime.date.today().year,
         )
         data = await self._ask(system, text or "(cuma kirim lampiran tanpa teks)", 0.7)

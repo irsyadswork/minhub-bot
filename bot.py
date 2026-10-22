@@ -429,6 +429,7 @@ async def on_ready():
     for guild in client.guilds:
         await sync_guild(guild)
         await recover_unanswered(guild)
+        await recover_control(guild)
     for loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, heartbeat_loop,
                  question_queue_loop):
         if not loop.is_running():
@@ -693,6 +694,23 @@ async def question_queue_loop():
     store.save(QUESTION_QUEUE, remaining)
 
 
+async def recover_control(guild: discord.Guild, minutes: int = 10):
+    """Pas nyala: perintah admin di channel kontrol yang masuk waktu bot mati/restart diproses sekarang."""
+    ctl = control_channel(guild)
+    if not ctl:
+        return
+    since = discord.utils.utcnow() - datetime.timedelta(minutes=minutes)
+    try:
+        messages = [m async for m in ctl.history(limit=30, after=since)]
+    except discord.HTTPException:
+        return
+    answered = {m.reference.message_id for m in messages if m.author == client.user and m.reference}
+    for m in messages:
+        if not m.author.bot and m.id not in answered and is_admin(m.author):
+            log.info("Proses perintah admin yang ketinggalan: %s", m.content[:80])
+            await handle_control(m)
+
+
 async def recover_unanswered(guild: discord.Guild, hours: int = 6):
     """Pas nyala: cari mention ke Minhub yang belum kejawab (atau cuma dapet pesan error) lalu masukin antrean."""
     since = discord.utils.utcnow() - datetime.timedelta(hours=hours)
@@ -757,7 +775,7 @@ async def handle_control(message: discord.Message):
                 message.clean_content, len(message.attachments),
                 ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
                 (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
-                store.recap(), pending_deadlines_text(), replied, pending_virals_text())
+                store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list())
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -769,6 +787,9 @@ async def handle_control(message: discord.Message):
         return
 
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
+    if cmd["aksi"] == "cek_viral":
+        await check_viral_now(message, [d["slug"] for d in cmd["keputusan"] if d.get("slug")])
+        return
     if cmd["aksi"] == "viral":
         decided = [d for d in cmd["keputusan"] if d["keputusan"] in ("kirim", "ganti", "skip", "revisi")]
         if not decided:
@@ -1002,13 +1023,19 @@ def viral_image(ask_id) -> bytes | None:
         return None
 
 
-async def propose_viral(guild: discord.Guild, campaign: dict, channel):
-    """Cari konten views terbesar yang belum pernah di-share/diganti, lalu usulkan ke admin."""
+async def propose_viral(guild: discord.Guild, campaign: dict, channel, force: bool = False):
+    """Cari konten views terbesar yang belum pernah di-share/diganti, lalu usulkan ke admin.
+    force=True (admin yang minta): kalau nggak ada yang tembus minimal views, tetap tunjukin yang teratas."""
     slug = campaign["slug"]
     ctl = control_channel(guild)
     candidates = await viral.candidates(slug, config.REPORTS[slug])
+    note = ""
+    if not candidates and force:
+        candidates = await viral.candidates(slug, config.REPORTS[slug], minimum=0)
+        note = "Belum ada yang tembus minimal views, ini yang paling tinggi sejauh ini."
     if not candidates:
-        viral.mark_skipped(slug)
+        if not force:
+            viral.mark_skipped(slug)
         return False
     rec = candidates[0]
     facts = viral.facts(campaign, rec)
@@ -1019,18 +1046,22 @@ async def propose_viral(guild: discord.Guild, campaign: dict, channel):
         "platform, dan jumlah views. Jangan tulis link (link ada di kartu preview).",
         {k: v for k, v in facts.items() if k != "link"}, texts.VIRAL, [facts["user"], facts["views"]])
     await show_viral_proposal(ctl, campaign, channel, rec, text, (preview or {}).get("caption"),
-                              (preview or {}).get("image"), len(candidates) - 1)
+                              (preview or {}).get("image"), len(candidates) - 1, note)
     return True
 
 
-async def show_viral_proposal(ctl, campaign: dict, channel, rec: dict, text: str, caption, image, others: int):
+async def show_viral_proposal(ctl, campaign: dict, channel, rec: dict, text: str, caption, image, others: int,
+                              note: str = ""):
     facts = viral.facts(campaign, rec)
     role = admin_role(ctl.guild)
     await send(ctl, f"{role.mention + ' ' if role else ''}Usulan konten top views buat {channel.mention} "
                     f"(persis kayak gini):", roles=True)
     preview_msg = await ctl.send("@everyone " + tidy(text), embeds=[viral_embed(facts, caption, bool(image))],
                                  files=viral_files(image), allowed_mentions=discord.AllowedMentions.none())
-    note = "" if image else "\nPreview gambarnya gagal diambil, jadi kalau di-acc aku kirim tanpa gambar."
+    if note:
+        note = f"\n{note}"
+    if not image:
+        note += "\nPreview gambarnya gagal diambil, jadi kalau di-acc aku kirim tanpa gambar."
     ask = await ctl.send(
         f"Acc dikirim? Cek dulu link-nya masih ada dan views-nya wajar ya.{note}\n"
         f"React ✅ kirim, 🔁 ganti konten lain ({others} kandidat lagi), ❌ skip hari ini. Atau bales pesan ini "
@@ -1047,6 +1078,38 @@ async def show_viral_proposal(ctl, campaign: dict, channel, rec: dict, text: str
     store.save(VIRAL_PENDING, pending)
     store.event("viral_proposed", slug=campaign["slug"], link=rec["link"])
     log.info("Usulan konten viral %s: %s", campaign["slug"], rec["link"])
+
+
+async def check_viral_now(message: discord.Message, slugs: list[str]):
+    """Admin minta cek konten top views sekarang (semua campaign, atau yang disebut)."""
+    guild = message.guild
+    channels = campaign_channels(guild)
+    waiting = {p["slug"] for p in pending_virals().values()}
+    targets = [s for s in (slugs or config.REPORTS) if s in config.REPORTS]
+    await control_reply(message, f"Siap kak, aku cekin laporan {len(targets)} campaign dulu ya, bentar")
+    missing = []
+    for slug in targets:
+        campaign, channel = watcher.get(slug), channels.get(slug)
+        if not campaign or not channel:
+            missing.append(slug)
+            continue
+        if slug in waiting:
+            await send(message.channel, f"**{campaign.get('title')}** masih ada usulan yang nunggu acc di atas ya")
+            continue
+        try:
+            if not await propose_viral(guild, campaign, channel, force=True):
+                await send(message.channel, f"**{campaign.get('title')}** belum ada konten baru di laporan "
+                                            f"(semua udah pernah di-share atau diganti)")
+        except Exception as e:
+            log.exception("Gagal cek konten viral %s", slug)
+            await send(message.channel, f"Gagal ngecek **{campaign.get('title')}**: `{e}`", raw=True)
+    if missing:
+        await send(message.channel, "Laporan ini nggak ada campaign/channel-nya: " + ", ".join(missing))
+
+
+def campaign_list() -> str:
+    return "\n".join(f"- {c['slug']}: {c.get('title')} | " + ", ".join(config.CAMPAIGN_ALIASES.get(c["slug"], []))
+                     for c in watcher.campaigns)
 
 
 def pending_virals() -> dict:
