@@ -43,8 +43,12 @@ def _remember(key, value):
     return value
 
 
-async def _get(session, url, limit=2_000_000):
-    async with session.get(url, headers={"User-Agent": UA, "Accept-Language": "id,en;q=0.8"},
+# Instagram/Threads cuma ngasih meta og:* ke crawler preview (yang dipakai Facebook/Discord), bukan ke browser biasa.
+CRAWLER_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
+
+
+async def _get(session, url, limit=2_000_000, ua=UA):
+    async with session.get(url, headers={"User-Agent": ua, "Accept-Language": "id,en;q=0.8"},
                            timeout=aiohttp.ClientTimeout(total=15), allow_redirects=True) as r:
         chunks, size = [], 0
         async for chunk in r.content.iter_chunked(65536):
@@ -70,9 +74,18 @@ async def og_info(url: str) -> dict:
     if ok:
         return val
     info = {}
+    for ua in (UA, CRAWLER_UA):
+        info = await _og_once(url, ua)
+        if info.get("image"):
+            break
+    return _remember(("og", url), info)
+
+
+async def _og_once(url: str, ua: str) -> dict:
+    info = {}
     try:
         async with aiohttp.ClientSession() as s:
-            status, ctype, body, final = await _get(s, url, 600_000)
+            status, ctype, body, final = await _get(s, url, 600_000, ua)
         if status == 200 and "html" in ctype:
             page = body.decode("utf-8", "ignore")
             info = {

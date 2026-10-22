@@ -56,35 +56,44 @@ class ViralSharer:
                 data = await r.json(content_type=None)
         return data.get("records") or []
 
-    async def pick(self, slug: str, token: str):
-        """Balikin konten yang harus di-share hari ini untuk campaign ini (atau None). Sekali per hari."""
-        today = today_wib().isoformat()
-        st = self.state.setdefault(slug, {"shared": [], "since": today, "last_big": None, "last_day": None})
-        if st["last_day"] == today:
-            return None
+    def _st(self, slug: str) -> dict:
+        st = self.state.setdefault(slug, {"shared": [], "since": today_wib().isoformat(), "last_big": None,
+                                          "last_day": None})
+        st.setdefault("rejected", [])
+        return st
 
-        records = await self.fetch(token)
-        shared = set(st["shared"])
-        candidates = sorted((r for r in records if r.get("link") and r["link"] not in shared),
-                            key=lambda r: r.get("views") or 0, reverse=True)
-        best = candidates[0] if candidates else None
-        best_views = (best or {}).get("views") or 0
+    def done_today(self, slug: str) -> bool:
+        return self._st(slug)["last_day"] == today_wib().isoformat()
 
+    async def candidates(self, slug: str, token: str) -> list[dict]:
+        """Konten yang layak diusulkan hari ini, views terbesar dulu. Yang sudah pernah di-share atau pernah
+        diganti admin (misal curiga suntik views / link mati) nggak ikut."""
+        st = self._st(slug)
+        skip = set(st["shared"]) | set(st["rejected"])
+        records = sorted((r for r in await self.fetch(token) if r.get("link") and r["link"] not in skip),
+                         key=lambda r: r.get("views") or 0, reverse=True)
         stuck_since = date.fromisoformat(st["last_big"] or st["since"])
-        stuck_days = (today_wib() - stuck_since).days
+        stuck = (today_wib() - stuck_since).days >= config.VIRAL_STUCK_DAYS
+        minimum = config.VIRAL_FALLBACK_MIN_VIEWS if stuck else config.VIRAL_MIN_VIEWS
+        return [r for r in records if (r.get("views") or 0) >= minimum]
 
-        choice = None
-        if best_views >= config.VIRAL_MIN_VIEWS:
-            choice = best
-            st["last_big"] = today
-        elif stuck_days >= config.VIRAL_STUCK_DAYS and best_views >= config.VIRAL_FALLBACK_MIN_VIEWS:
-            choice = best
-
+    def mark_posted(self, slug: str, rec: dict):
+        st = self._st(slug)
+        today = today_wib().isoformat()
+        st["shared"].append(rec["link"])
         st["last_day"] = today
-        if choice:
-            st["shared"].append(choice["link"])
+        if (rec.get("views") or 0) >= config.VIRAL_MIN_VIEWS:
+            st["last_big"] = today
         self._save()
-        return choice
+
+    def mark_rejected(self, slug: str, link: str):
+        self._st(slug)["rejected"].append(link)
+        self._save()
+
+    def mark_skipped(self, slug: str):
+        """Hari ini nggak ada yang di-share (nggak ada kandidat, atau admin pilih skip)."""
+        self._st(slug)["last_day"] = today_wib().isoformat()
+        self._save()
 
     def facts(self, campaign: dict, rec: dict) -> dict:
         """Data yang wajib disebut di alert: kreator, campaign, platform, views, link."""

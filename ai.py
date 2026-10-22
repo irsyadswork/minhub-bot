@@ -88,6 +88,9 @@ DRAF TERAKHIR YANG BELUM TERKIRIM: {draft}
 OBROLAN TERAKHIR DI CHANNEL KONTROL (paling bawah = terbaru):
 {history}
 
+PESAN KAMU YANG SEDANG DI-REPLY ADMIN (paling penting buat konteks; kalau ada, perintah admin merujuk ke pesan ini):
+{replied}
+
 DATA REKAP ASLI (cuma ini sumber angka rekap; kalau yang ditanya nggak ada di sini, bilang jujur datanya belum ada,
 JANGAN mengarang angka):
 {recap}
@@ -95,12 +98,22 @@ JANGAN mengarang angka):
 PERTANYAAN DEADLINE YANG KAMU AJUKAN & BELUM DIJAWAB (kamu nanya ke atasan: campaign ini mau di-extend atau closed):
 {deadlines}
 
+USULAN KONTEN VIRAL (TOP VIEWS) YANG NUNGGU ACC ADMIN:
+{virals}
+
 Tugasmu, pilih satu "aksi":
+- "viral": pesan admin menjawab usulan konten viral di atas. Isi "keputusan" berupa list, satu item per usulan:
+  {{"id": persis dari daftar di atas, "keputusan": "kirim" (acc/oke/gas/share aja, termasuk "share tanpa embed"),
+  "ganti" (minta konten lain, misal link mati/curiga suntik views/curang), "skip" (jangan kirim hari ini), atau
+  "revisi" (minta ubah kalimat), "pesan_baru": teks pengganti kalau "revisi", selain itu ""}}.
+  Kalau admin me-reply salah satu usulan, pakai id usulan itu.
 - "deadline": pesan admin menjawab pertanyaan deadline di atas (misal "closed aja", "tutup sesuai jadwal",
   "extend", "perpanjang sampai 30 Okt", "siti closed, ajaib extend"). Isi "keputusan" berupa list, satu item per
   campaign yang dijawab: {{"slug": persis dari daftar di atas, "keputusan": "closed" atau "extend",
   "tanggal_baru": YYYY-MM-DD kalau admin nyebut tanggal/durasi (tahun {year} kalau nggak disebut), selain itu ""}}.
   Kalau ada beberapa pertanyaan dan nggak jelas campaign mana yang dijawab, pakai aksi "tanya".
+- Kalau admin me-reply preview draf dengan koreksi (misal "jangan gabung link", "ganti kalimatnya"), itu REVISI draf:
+  aksi "kirim" dengan "pesan" yang sudah direvisi (tujuan tetap sama dengan draf).
 - "kirim": admin minta ngirim/umumin/share sesuatu. Tulis "pesan" yang akan dikirim ke member (gaya santai sesuai
   aturan di atas; jangan sebut "admin nyuruh aku"). Kalau admin sudah nulis kalimat/link sendiri, pakai dan rapikan,
   link HARUS ikut persis. Kalau admin cuma bilang "kirim aja"/"oke kirim" untuk draf terakhir, kosongkan "pesan".
@@ -110,7 +123,7 @@ Tugasmu, pilih satu "aksi":
 - "balas": ngobrol biasa atau tanya (termasuk rekap), jawab di "balasan".
 Jangan pernah tulis @everyone atau @here di "pesan".
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
@@ -206,7 +219,7 @@ class Brain:
         }
 
     async def command(self, text: str, n_attachments: int, mentioned: str, history: str,
-                      draft: str, recap: str, deadlines: str = "") -> dict:
+                      draft: str, recap: str, deadlines: str = "", replied: str = "", virals: str = "") -> dict:
         system = COMMAND_PROMPT.format(
             **self._base(),
             mentioned=mentioned or "(tidak ada)",
@@ -215,6 +228,8 @@ class Brain:
             history=history or "(belum ada)",
             recap=recap,
             deadlines=deadlines or "(tidak ada)",
+            replied=replied or "(admin nggak lagi me-reply pesan kamu)",
+            virals=virals or "(tidak ada)",
             year=datetime.date.today().year,
         )
         data = await self._ask(system, text or "(cuma kirim lampiran tanpa teks)", 0.7)
@@ -222,7 +237,8 @@ class Brain:
         decisions = data.get("keputusan") or []
         result["keputusan"] = [
             {"slug": str(d.get("slug", "")).strip(), "keputusan": str(d.get("keputusan", "")).strip().lower(),
-             "tanggal_baru": str(d.get("tanggal_baru", "") or "").strip()}
+             "tanggal_baru": str(d.get("tanggal_baru", "") or "").strip(), "id": str(d.get("id", "") or "").strip(),
+             "pesan_baru": str(d.get("pesan_baru", "") or "").strip()}
             for d in (decisions if isinstance(decisions, list) else [decisions]) if isinstance(d, dict)
         ]
         return result
