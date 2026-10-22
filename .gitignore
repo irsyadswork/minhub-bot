@@ -5,6 +5,7 @@ viral_state.json
 reminder_state.json
 bot_state.json
 campaign_state.json
+deadline_state.json
 events.jsonl
 activity.jsonl
 *.tmp
