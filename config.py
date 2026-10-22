@@ -1,13 +1,26 @@
 """
 Pengaturan bot Minhub. Ubah sesuai kebutuhan, lalu restart bot.
-Nama channel/role boleh sebagian saja (misal "welcome" cocok dengan "👋・welcome").
+Channel & role dicari pakai ID dulu (aman walau di-rename). Nama cuma cadangan kalau ID-nya kosong/nggak ketemu.
+Cara ambil ID: Discord > Settings > Advanced > Developer Mode ON, lalu klik kanan channel > Copy Channel ID.
 """
 
 SERVER_NAME = "Clipper Hub Circle"
 BOT_NAME = "Minhub"
 CAMPAIGN_SITE = "https://campaign.clipperhub.site"
 
-# --- Channel ---
+# --- Server yang boleh dipakai. Kalau bot dimasukkan ke server lain, otomatis keluar. ---
+GUILD_ID = 1457619105803796604
+
+# --- Channel (ID) ---
+WELCOME_CHANNEL_ID = 1457619107666198579   # #welcome
+GENERAL_CHANNEL_ID = 1562391135693832273   # #diskusi-general
+CONTROL_CHANNEL_ID = 1562391137250181201   # #minhub-control
+CAMPAIGN_CHANNEL_ID = 1458784634463846585  # #pengumuman
+RULES_CHANNEL_ID = 1457960457251065877     # #rules
+CAMPAIGN_CATEGORY_ID = 1562391140551102514 # kategori "Diskusi Campaign"
+ADMIN_ROLE_ID = 1458782103377412293        # role Admin Komunitas
+
+# --- Channel (nama cadangan) ---
 WELCOME_CHANNEL = "welcome"            # tempat kartu welcome dikirim
 GENERAL_CHANNEL = "diskusi"            # diskusi umum (dibuat otomatis kalau belum ada)
 CONTROL_CHANNEL = "minhub-control"     # channel privat admin untuk ngasih perintah ke Minhub (dibuat otomatis)
@@ -17,13 +30,13 @@ CAMPAIGN_CHANNEL = "pengumuman"        # tempat pengumuman campaign baru
 
 # --- Channel per campaign (dibuat & diatur otomatis oleh bot) ---
 CAMPAIGN_CATEGORY = "Diskusi Campaign 🎬"
-CAMPAIGN_CHANNEL_PREFIX = "🎬・"
+CAMPAIGN_CHANNEL_SEPARATOR = "・"       # nama channel: <status budget>・<slug campaign>
 
 # --- Role admin yang di-tag untuk pertanyaan teknis & boleh ngasih perintah ---
 ADMIN_ROLE = "Admin Komunitas"
 
 # --- Welcome ---
-WELCOME_TEXT = "Yooo {mention}, welcome di **{server}**! 🎬 Jangan lupa kenalan dulu ya~"
+# Teks welcome dipilih random dari texts.WELCOME
 WELCOME_BACKGROUND = "assets/background.webp"
 WELCOME_BG_FOCUS = 0.3                 # bagian background yang dipakai: 0 = atas, 1 = bawah
 # Font dicoba berurutan (boleh pakai *). Montserrat ikut di folder assets, jadi tampilan sama di mana pun.
@@ -41,6 +54,13 @@ HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar 
 # Dicoba berurutan: kalau model pertama lambat/overload, otomatis pindah ke berikutnya.
 GEMINI_MODELS = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"]
 GEMINI_TIMEOUT = 15                    # detik per percobaan
+GEMINI_RETRIES = 1                     # kena 503/429/timeout: coba ulang sekian kali sebelum pindah model
+GEMINI_RETRY_DELAY = 2                 # detik jeda sebelum coba ulang
+
+# --- Keamanan & monitoring ---
+RATE_LIMIT_PER_MINUTE = 5              # maks pertanyaan yang dijawab per member per menit (admin bebas)
+RATE_LIMIT_PER_HOUR = 40
+ALERT_COOLDOWN_MINUTES = 10            # alert yang sama ke channel kontrol paling sering sekali per sekian menit
 
 # --- Share konten meledak dari laporan client (sekali sehari per campaign, tag @everyone) ---
 # slug campaign di website -> kode laporan (bagian terakhir link laporan.clipperhub.site/laporan/<kode>)
@@ -63,4 +83,14 @@ LOGIN_REMINDER_URL = "https://wispbyte.com/client"
 
 # --- Pengumuman campaign baru ---
 CAMPAIGN_CHECK_MINUTES = 3
-CAMPAIGN_TEXT = "🚨 **Campaign baru drop, guys!** Gas join sebelum slotnya penuh 👇"
+
+# --- Status budget di nama channel campaign + update campaign ---
+STATUS_CHECK_MINUTES = 30              # cek sisa budget & perubahan data campaign
+BUDGET_YELLOW_PCT = 5                  # sisa > 0% s/d 5% = 🟡, di atas itu 🟢, 0% = 🔴
+DEADLINE_REMINDER_HOUR = 9             # jam (WIB) kirim pengingat deadline H-1 dan hari H
+
+# --- Pengingat harian di #diskusi-general ---
+DAILY_REMINDER_HOUR = 17               # jam (WIB). Aktif setelah admin react ✅ di preview di #minhub-control
+
+# --- Gambar cadangan untuk preview link (harus https, publik, idealnya 1200x630) ---
+FALLBACK_IMAGES = ["https://campaign.clipperhub.site/opengraph-image"]

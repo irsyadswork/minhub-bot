@@ -8,7 +8,6 @@ Aturan:
 """
 import json
 import os
-import random
 from datetime import date, datetime, timedelta, timezone
 
 import aiohttp
@@ -19,14 +18,8 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viral_sta
 REPORT_API = "https://laporan.clipperhub.site/api/laporan/"
 WIB = timezone(timedelta(hours=7))
 
-TEMPLATES = [
-    "@everyone 🔥 Gais ini konten meledak di **{title}**! Viewsnya udah **{views}** di {platform} (by {user}). "
-    "Gasskeun ATM dan ikutin yak 👇\n{link}",
-    "@everyone 🚀 Ada yang tembus **{views} views** nih di {platform} (by {user})! Amati, tiru, modifikasi, "
-    "terus gas upload versi kalian 💪\n{link}",
-    "@everyone 💣 Konten **{title}** ini lagi pecah: **{views} views** di {platform} (by {user}). "
-    "Pelajari hook-nya, ATM, dan ikutin yak!\n{link}",
-]
+PLATFORM_NAMES = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube", "threads": "Threads",
+                  "facebook": "Facebook", "x": "X", "twitter": "X"}
 
 
 def _views(n: int) -> str:
@@ -93,12 +86,14 @@ class ViralSharer:
         self._save()
         return choice
 
-    def message(self, campaign: dict, rec: dict) -> str:
+    def facts(self, campaign: dict, rec: dict) -> dict:
+        """Data yang wajib disebut di alert: kreator, campaign, platform, views, link."""
         user = rec.get("username") or "clipper"
-        return random.choice(TEMPLATES).format(
-            title=campaign.get("title", "campaign ini"),
-            views=_views(int(rec.get("views") or 0)),
-            platform=rec.get("platform") or "sosmed",
-            user=f"@{user.lstrip('@')}",
-            link=rec["link"],
-        )
+        platform = str(rec.get("platform") or "sosmed")
+        return {
+            "title": campaign.get("title", "campaign ini"),
+            "views": _views(int(rec.get("views") or 0)),
+            "platform": PLATFORM_NAMES.get(platform.lower(), platform),
+            "user": f"@{user.lstrip('@')}",
+            "link": rec["link"],
+        }
