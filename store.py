@@ -49,8 +49,8 @@ def _append(path: str, row: dict):
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def event(kind: str, **data):
-    _append(EVENTS_FILE, {"type": kind, **data})
+def event(event_type: str, /, **data):
+    _append(EVENTS_FILE, {"type": event_type, **data})
 
 
 def activity(**data):

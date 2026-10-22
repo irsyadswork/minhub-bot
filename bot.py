@@ -891,6 +891,7 @@ async def status_loop():
     elif changes:
         await alert("Status budget campaign berubah:\n" + "\n".join(changes), cooldown=False)
         store.event("status_alert_sent", count=len(changes))
+    store.save("campaign_state.json", state)
 
     # Perubahan data campaign -> kabari di channel campaign itu (bukan di #pengumuman)
     for c in watcher.campaigns:
@@ -921,9 +922,10 @@ async def status_loop():
             if not ch or not key or f"{key}:{c.get('deadline')}" in done:
                 continue
             facts = watcher.announce_facts(c)
-            await send(ch, random.choice(texts.DEADLINE_H1 if key == "H-1" else texts.DEADLINE_H).format(**facts))
             done.append(f"{key}:{c.get('deadline')}")
-            store.event("deadline_reminder_sent", slug=c["slug"], kind=key)
+            store.save("campaign_state.json", state)  # catat dulu biar nggak kekirim dobel kalau ada error
+            await send(ch, random.choice(texts.DEADLINE_H1 if key == "H-1" else texts.DEADLINE_H).format(**facts))
+            store.event("deadline_reminder_sent", slug=c["slug"], reminder=key)
 
     store.save("campaign_state.json", state)
 
