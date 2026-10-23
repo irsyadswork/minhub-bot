@@ -19,3 +19,4 @@ __pycache__/
 .venv/
 preview_welcome.png
 .local/
+announce_pending.json

@@ -760,12 +760,15 @@ async def handle_control(message: discord.Message):
 
     # Admin nge-reply pesan Minhub: isi pesan itu ikut jadi konteks (biar "ini ke #channel" nyambung)
     ref = message.reference.resolved if message.reference else None
-    replied, reply_viral = "", None
+    replied, reply_viral, reply_announce = "", None, None
     if isinstance(ref, discord.Message) and ref.author == client.user:
         replied = ref.clean_content[:600] + (f" [kartu: {ref.embeds[0].title}]" if ref.embeds else "")
         reply_viral = viral_ask_for(ref.id)
+        reply_announce = announce_ask_for(ref.id)
         if reply_viral:
             replied += f" (ini usulan konten viral id {reply_viral})"
+        elif reply_announce:
+            replied += f" (ini usulan pengumuman id {reply_announce})"
         elif draft and ref.id in draft.get("preview_ids", ()):
             replied += " (ini preview draf terakhir; balasan admin = revisi atau keputusan untuk draf itu)"
 
@@ -775,7 +778,8 @@ async def handle_control(message: discord.Message):
                 message.clean_content, len(message.attachments),
                 ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
                 (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
-                store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list())
+                store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
+                pending_announcements_text())
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -789,6 +793,19 @@ async def handle_control(message: discord.Message):
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
     if cmd["aksi"] == "cek_viral":
         await check_viral_now(message, [d["slug"] for d in cmd["keputusan"] if d.get("slug")])
+        return
+    if cmd["aksi"] == "pengumuman":
+        decided = [d for d in cmd["keputusan"] if d["keputusan"] in ("kirim", "skip", "revisi")]
+        if not decided:
+            await control_reply(message, cmd["balasan"] or "Yang itu mau dikirim atau nggak kak?")
+        for d in decided:
+            ask_id = d["id"] if d["id"] in pending_announcements() else reply_announce
+            try:
+                await decide_announcement(ask_id, d["keputusan"], author, d["pesan_baru"], reference=message)
+            except discord.HTTPException as e:
+                log.exception("Gagal proses keputusan pengumuman")
+                await control_reply(message, f"Gagal kirim: `{type(e).__name__} {e.status}: {e.text[:300]}`",
+                                    error=True)
         return
     if cmd["aksi"] == "viral":
         decided = [d for d in cmd["keputusan"] if d["keputusan"] in ("kirim", "ganti", "skip", "revisi")]
@@ -902,6 +919,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
     guild = client.get_guild(payload.guild_id)
     member = payload.member or (guild.get_member(payload.user_id) if guild else None)
+    if str(payload.message_id) in pending_announcements():
+        decision = ANNOUNCE_REACTIONS.get(str(payload.emoji))
+        if decision and is_admin(member):
+            await decide_announcement(str(payload.message_id), decision, member)
+        return
     if str(payload.message_id) in pending_virals():
         decision = VIRAL_REACTIONS.get(str(payload.emoji))
         if decision and is_admin(member):
@@ -1242,9 +1264,12 @@ async def status_loop():
         lines = watcher.diff(old, new)
         if lines:
             opener = random.choice(texts.UPDATE_OPENER).format(title=c.get("title"))
-            await send(ch, opener + "\n" + "\n".join(f"- {l}" for l in lines) + f"\nBrief lengkap: {watcher.link(c)}")
-            store.event("campaign_update_sent", slug=c["slug"], changes=len(lines))
-            log.info("Update campaign %s: %d perubahan", c["slug"], len(lines))
+            await propose_announcement(
+                guild, ch, opener + "\n" + "\n".join(f"- {l}" for l in lines) + f"\nBrief lengkap: {watcher.link(c)}",
+                "campaign_update", c["slug"],
+                f"Data campaign **{c.get('title')}** di website barusan berubah. Boleh aku kabarin ke {ch.mention} "
+                f"kayak gini kak?")
+            log.info("Usulan update campaign %s: %d perubahan", c["slug"], len(lines))
 
     # Pengingat deadline H-1 dan hari H
     now = store.now_wib()
@@ -1263,13 +1288,84 @@ async def status_loop():
             done.append(f"{key}:{c.get('deadline')}")
             store.save("campaign_state.json", state)  # catat dulu biar nggak kekirim dobel kalau ada error
             if key == "H-1":
-                msg = await send(ch, random.choice(texts.DEADLINE_H1).format(**facts))
-                store.event("deadline_reminder_sent", slug=c["slug"], reminder=key)
-                log.info("Pengingat deadline H-1 %s: %s", c["slug"], msg.jump_url)
+                await propose_announcement(
+                    guild, ch, random.choice(texts.DEADLINE_H1).format(**facts), "deadline_h1", c["slug"],
+                    f"Besok deadline **{c.get('title')}** ({facts['deadline']}). Boleh aku kirim pengingat ini ke "
+                    f"{ch.mention} kak? Kalau mau di-extend, bilang aja, nanti nggak aku kirim")
             else:
                 await ask_deadline(guild, c, ch)
 
     store.save("campaign_state.json", state)
+
+
+ANNOUNCE_PENDING = "announce_pending.json"  # id pesan pertanyaan di #minhub-control -> pengumuman yang nunggu acc
+ANNOUNCE_REACTIONS = {"✅": "kirim", "❌": "skip"}
+
+
+async def propose_announcement(guild: discord.Guild, channel, text: str, kind: str, slug: str, question: str,
+                               everyone: bool = False):
+    """Pengumuman campaign (H-1, perubahan data) nggak langsung di-blast: tunjukin preview & tanya admin dulu."""
+    ctl = control_channel(guild)
+    if not ctl:
+        return
+    role = admin_role(guild)
+    await send(ctl, f"{role.mention + ' ' if role else ''}{question}", roles=True)
+    preview = await ctl.send(("@everyone " if everyone else "") + tidy(text)[:1900],
+                             allowed_mentions=discord.AllowedMentions.none())
+    ask = await ctl.send("React ✅ kirim, ❌ jangan dikirim. Atau bales pakai chat biasa, misal *oke kirim*, "
+                         "*jangan dulu*, atau *revisi jadi ...*.")
+    for emoji in ANNOUNCE_REACTIONS:
+        await ask.add_reaction(emoji)
+    pending = store.load(ANNOUNCE_PENDING, {})
+    pending[str(ask.id)] = {"kind": kind, "slug": slug, "channel_id": channel.id, "text": text,
+                            "everyone": everyone, "question": question, "preview_id": preview.id}
+    store.save(ANNOUNCE_PENDING, pending)
+    store.event("announce_proposed", kind=kind, slug=slug)
+
+
+def pending_announcements() -> dict:
+    return store.load(ANNOUNCE_PENDING, {})
+
+
+def pending_announcements_text() -> str:
+    lines = []
+    for ask_id, p in pending_announcements().items():
+        c = watcher.get(p["slug"]) or {"title": p["slug"]}
+        label = {"deadline_h1": "pengingat H-1 deadline", "campaign_update": "info perubahan data campaign"}.get(
+            p["kind"], p["kind"])
+        lines.append(f"- id: {ask_id} | {label} {c.get('title')} | isi: {p['text'][:150]}")
+    return "\n".join(lines)
+
+
+def announce_ask_for(message_id: int) -> str | None:
+    for ask_id, p in pending_announcements().items():
+        if message_id in (int(ask_id), p.get("preview_id")):
+            return ask_id
+    return None
+
+
+async def decide_announcement(ask_id: str, decision: str, member, new_text: str = "", reference=None):
+    """Keputusan admin untuk usulan pengumuman: kirim / skip / revisi."""
+    pending = pending_announcements()
+    p = pending.pop(str(ask_id), None)
+    guild = home_guild()
+    ctl = control_channel(guild)
+    if not p:
+        await send(ctl, "Usulan itu udah nggak aktif (mungkin udah diputusin).", reference=reference)
+        return
+    store.save(ANNOUNCE_PENDING, pending)
+    channel = guild.get_channel(p["channel_id"])
+    store.activity(kind="announce_decision", user=str(member), user_id=member.id, slug=p["slug"],
+                   announce=p["kind"], decision=decision)
+    if decision == "revisi" and new_text and channel:
+        await propose_announcement(guild, channel, new_text, p["kind"], p["slug"], p["question"], p["everyone"])
+    elif decision == "kirim" and channel:
+        msg = await send(channel, ("@everyone " if p["everyone"] else "") + p["text"], everyone=p["everyone"])
+        store.event({"deadline_h1": "deadline_reminder_sent"}.get(p["kind"], "campaign_update_sent"),
+                    slug=p["slug"], kind_detail=p["kind"])
+        await send(ctl, f"Oke, udah aku kirim: {msg.jump_url}", reference=reference)
+    else:
+        await send(ctl, "Siap, yang itu nggak aku kirim.", reference=reference)
 
 
 async def ask_deadline(guild: discord.Guild, c: dict, channel):
