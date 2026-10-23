@@ -13,6 +13,29 @@ import time
 import urllib.request
 from collections import defaultdict, deque
 
+RETRY_EXIT_CODE = 75  # bot berhenti karena gangguan sementara (misal IP diblokir Discord) -> nyalakan lagi
+
+
+def supervise():
+    """Penjaga: jalankan bot sebagai proses anak. Kalau berhenti karena gangguan sementara (misal IP server
+    diblokir Discord), tunggu lalu coba lagi sendiri, jadi nggak perlu klik Start manual."""
+    import subprocess
+    delay = 60
+    while True:
+        started = time.monotonic()
+        code = subprocess.call([sys.executable, os.path.abspath(__file__), "--child"])
+        if code != RETRY_EXIT_CODE:
+            sys.exit(code)
+        if time.monotonic() - started > 600:  # sempat jalan normal lama -> mulai lagi dari jeda pendek
+            delay = 60
+        print(f"[penjaga] Minhub gagal nyambung ke Discord, coba lagi {delay // 60} menit lagi", flush=True)
+        time.sleep(delay)
+        delay = min(delay * 2, 900)
+
+
+if __name__ == "__main__" and "--child" not in sys.argv:
+    supervise()
+
 import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
@@ -44,7 +67,8 @@ def detect_intents(token: str) -> discord.Intents:
         flags = json.load(urllib.request.urlopen(req, timeout=15)).get("flags", 0)
         intents.message_content = bool(flags & ((1 << 18) | (1 << 19)))
     except Exception:
-        log.exception("Gagal cek intent aplikasi")
+        log.exception("Gagal cek intent aplikasi, anggap Message Content Intent aktif")
+        intents.message_content = True  # sudah dinyalakan di Developer Portal; gagal cek biasanya cuma gangguan
     if not intents.message_content:
         log.warning("Message Content Intent belum aktif: Minhub cuma bisa jawab kalau di-tag.")
     return intents
@@ -1540,6 +1564,11 @@ for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop,
 if __name__ == "__main__":
     try:
         client.run(os.environ["DISCORD_TOKEN"], log_handler=None)
+    except (discord.LoginFailure, discord.PrivilegedIntentsRequired):
+        raise  # token/intent salah: jangan dicoba ulang terus
+    except Exception:
+        log.exception("Minhub berhenti karena gangguan koneksi ke Discord")
+        sys.exit(RETRY_EXIT_CODE)
     finally:
         state = store.load("bot_state.json", {})
         state["clean_stop"] = store.now_wib().isoformat(timespec="seconds")
