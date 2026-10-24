@@ -74,7 +74,8 @@ def detect_intents(token: str) -> discord.Intents:
     return intents
 
 
-client = discord.Client(intents=detect_intents(os.environ["DISCORD_TOKEN"]))
+# Rate limit Discord yang nyuruh nunggu lebih dari 60 detik langsung jadi error (bukan nunggu diam-diam selamanya)
+client = discord.Client(intents=detect_intents(os.environ["DISCORD_TOKEN"]), max_ratelimit_timeout=60.0)
 
 with open(os.path.join(HERE, "faq.md"), encoding="utf-8") as f:
     brain = Brain(os.environ["GEMINI_API_KEY"], f.read())
@@ -445,25 +446,41 @@ async def on_ready():
     if started:  # on_ready bisa kepanggil lagi setelah reconnect
         return
     started = True
-    await announce_startup()
-    try:
-        await watcher.fetch()
-    except Exception:
-        log.exception("Gagal ambil data campaign")
-    for guild in client.guilds:
-        await sync_guild(guild)
-        await recover_unanswered(guild)
-        await recover_control(guild)
-    for loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, heartbeat_loop,
-                 question_queue_loop):
+    previous = store.load("bot_state.json", {})  # dibaca sebelum heartbeat baru nimpa
+    # Tugas berkala dinyalakan paling awal, biar nggak ketahan kalau langkah lain nyangkut
+    for loop in LOOPS:
         if not loop.is_running():
             loop.start()
+    log.info("Tugas berkala jalan")
+    await announce_startup(previous)
+    asyncio.create_task(startup_recovery(previous.get("heartbeat")))
 
 
-async def announce_startup():
+async def startup_recovery(last_alive: str | None):
+    """Langkah pemulihan pas nyala, jalan di belakang dengan batas waktu per langkah."""
+    now = discord.utils.utcnow()
+    try:
+        since = datetime.datetime.fromisoformat(last_alive).astimezone(datetime.timezone.utc)
+    except (TypeError, ValueError):
+        since = now - datetime.timedelta(hours=6)
+    since = max(since - datetime.timedelta(minutes=10), now - datetime.timedelta(hours=12))
+    steps = [("ambil data campaign", watcher.fetch())]
+    for guild in client.guilds:
+        steps += [("sinkron channel", sync_guild(guild)),
+                  ("cari pertanyaan belum kejawab", recover_unanswered(guild, since)),
+                  ("cari perintah admin ketinggalan", recover_control(guild, since))]
+    for name, step in steps:
+        try:
+            await asyncio.wait_for(step, timeout=300)
+            log.info("Pemulihan: %s beres", name)
+        except Exception as e:
+            log.exception("Pemulihan: %s gagal", name)
+            await alert(f"Langkah pas nyala `{name}` gagal: `{type(e).__name__}: {str(e)[:200]}`", key=f"startup:{name}")
+
+
+async def announce_startup(previous: dict):
     """Alert ke admin tiap bot nyala. Ketahuan juga kalau sebelumnya mati mendadak atau ada bot dobel."""
-    state = store.load("bot_state.json", {})
-    beat, clean = state.get("heartbeat"), state.get("clean_stop")
+    beat, clean = previous.get("heartbeat"), previous.get("clean_stop")
     if not beat:
         why = "Ini start pertama dengan sistem alert."
     elif clean and clean >= beat:
@@ -471,6 +488,7 @@ async def announce_startup():
     else:
         why = (f"Sebelumnya mati mendadak/crash, terakhir kelihatan hidup {beat[:16].replace('T', ' ')} WIB. "
                f"Cek log Wispbyte kalau perlu.")
+    state = store.load("bot_state.json", {})
     state["clean_stop"] = None
     store.save("bot_state.json", state)
     store.activity(kind="startup", host=host_label(), version=git_version())
@@ -718,12 +736,11 @@ async def question_queue_loop():
     store.save(QUESTION_QUEUE, remaining)
 
 
-async def recover_control(guild: discord.Guild, minutes: int = 10):
+async def recover_control(guild: discord.Guild, since: datetime.datetime):
     """Pas nyala: perintah admin di channel kontrol yang masuk waktu bot mati/restart diproses sekarang."""
     ctl = control_channel(guild)
     if not ctl:
         return
-    since = discord.utils.utcnow() - datetime.timedelta(minutes=minutes)
     try:
         messages = [m async for m in ctl.history(limit=30, after=since)]
     except discord.HTTPException:
@@ -735,9 +752,8 @@ async def recover_control(guild: discord.Guild, minutes: int = 10):
             await handle_control(m)
 
 
-async def recover_unanswered(guild: discord.Guild, hours: int = 6):
+async def recover_unanswered(guild: discord.Guild, since: datetime.datetime):
     """Pas nyala: cari mention ke Minhub yang belum kejawab (atau cuma dapet pesan error) lalu masukin antrean."""
-    since = discord.utils.utcnow() - datetime.timedelta(hours=hours)
     channels = [general_channel(guild)] + list(campaign_channels(guild).values())
     found = 0
     for channel in filter(None, channels):
@@ -756,7 +772,7 @@ async def recover_unanswered(guild: discord.Guild, hours: int = 6):
                 found += 1
     if found:
         log.info("Ada %d pertanyaan belum kejawab, masuk antrean", found)
-        await alert(f"Ada {found} pertanyaan ke aku yang belum kejawab dalam {hours} jam terakhir, aku jawab sekarang.",
+        await alert(f"Ada {found} pertanyaan ke aku yang belum kejawab selama aku mati, aku jawab sekarang.",
                     cooldown=False)
 
 
@@ -1547,6 +1563,14 @@ async def heartbeat_loop():
     state = store.load("bot_state.json", {})
     state["heartbeat"] = store.now_wib().isoformat(timespec="seconds")
     store.save("bot_state.json", state)
+    # Penjaga: tugas berkala yang mati dinyalakan lagi
+    for loop in LOOPS:
+        if loop is not heartbeat_loop and not loop.is_running():
+            log.warning("Tugas %s mati, dinyalakan lagi", loop.coro.__name__)
+            loop.start()
+
+
+LOOPS = (heartbeat_loop, campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop)
 
 
 for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop):
@@ -1569,7 +1593,7 @@ if __name__ == "__main__":
     except Exception:
         log.exception("Minhub berhenti karena gangguan koneksi ke Discord")
         sys.exit(RETRY_EXIT_CODE)
-    finally:
-        state = store.load("bot_state.json", {})
-        state["clean_stop"] = store.now_wib().isoformat(timespec="seconds")
-        store.save("bot_state.json", state)
+    # Sampai sini cuma kalau dimatikan normal (bukan gagal login), jadi baru dicatat sebagai mati normal
+    state = store.load("bot_state.json", {})
+    state["clean_stop"] = store.now_wib().isoformat(timespec="seconds")
+    store.save("bot_state.json", state)
