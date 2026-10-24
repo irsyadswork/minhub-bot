@@ -463,7 +463,7 @@ async def startup_recovery(last_alive: str | None):
         since = datetime.datetime.fromisoformat(last_alive).astimezone(datetime.timezone.utc)
     except (TypeError, ValueError):
         since = now - datetime.timedelta(hours=6)
-    since = max(since - datetime.timedelta(minutes=10), now - datetime.timedelta(hours=12))
+    since = max(since - datetime.timedelta(minutes=10), now - datetime.timedelta(hours=24))
     steps = [("ambil data campaign", watcher.fetch())]
     for guild in client.guilds:
         steps += [("sinkron channel", sync_guild(guild)),
