@@ -121,6 +121,10 @@ PERTANYAAN DEADLINE YANG KAMU AJUKAN & BELUM DIJAWAB (kamu nanya ke atasan: camp
 DAFTAR CAMPAIGN (slug: judul | sering disebut):
 {campaigns}
 
+ISI TERBARU CHANNEL YANG DISEBUT ADMIN (cuma ini yang kamu tahu soal isi channel lain; kalau admin nanya isi
+channel yang nggak ada di sini, bilang kamu belum bisa lihat dan minta admin sebut channelnya, misal #diskusi-general):
+{channel_content}
+
 USULAN PENGUMUMAN CAMPAIGN YANG NUNGGU ACC ADMIN (pengingat H-1, info perubahan data campaign):
 {announcements}
 
@@ -128,6 +132,8 @@ USULAN KONTEN VIRAL (TOP VIEWS) YANG NUNGGU ACC ADMIN:
 {virals}
 
 Tugasmu, pilih satu "aksi":
+- "cek_campaign": admin minta cek website campaign / campaign baru (misal "ada campaign baru di website, cek deh",
+  "cek web"). Kamu PUNYA akses ke website lewat aksi ini: campaign baru langsung dibikinin channel dan diumumkan.
 - "cek_viral": admin minta cek/cari/provide konten top views dari laporan sekarang dan preview usulannya (misal
   "cek top views semua campaign", "hari ini belum share top konten, provide dulu", "cariin konten paling rame buat
   siti"). Isi "keputusan" dengan list {{"slug": ...}} kalau admin nyebut campaign tertentu (slug dari daftar campaign
@@ -141,7 +147,11 @@ Tugasmu, pilih satu "aksi":
   "ganti" (minta konten lain, misal link mati/curiga suntik views/curang), "skip" (jangan kirim hari ini), atau
   "revisi" (minta ubah kalimat), "pesan_baru": teks pengganti kalau "revisi", selain itu ""}}.
   Kalau admin me-reply salah satu usulan, pakai id usulan itu.
-- "deadline": pesan admin menjawab pertanyaan deadline di atas (misal "closed aja", "tutup sesuai jadwal",
+- "deadline": HANYA kalau admin jelas menjawab pertanyaan extend/closed di atas (atau me-reply pertanyaan itu).
+  Kalau admin nyebut channel (#...) dan nyuruh jawab/balas/kasih tau member di sana, itu SELALU aksi "kirim" ke
+  channel itu (isi "pesan" = jawaban buat member), walaupun ada kata "extend"/"closed". Contoh: "jawab aja kalau
+  waktunya di-extend di #diskusi-general" -> aksi "kirim", pesan menjawab pertanyaan member bahwa waktunya
+  diperpanjang. Kalau ragu, pakai "tanya". Pesan admin menjawab pertanyaan deadline di atas (misal "closed aja", "tutup sesuai jadwal",
   "extend", "perpanjang sampai 30 Okt", "siti closed, ajaib extend"). Isi "keputusan" berupa list, satu item per
   campaign yang dijawab: {{"slug": persis dari daftar di atas, "keputusan": "closed" atau "extend",
   "tanggal_baru": YYYY-MM-DD kalau admin nyebut tanggal/durasi (tahun {year} kalau nggak disebut), selain itu ""}}.
@@ -158,7 +168,7 @@ Tugasmu, pilih satu "aksi":
 - "balas": ngobrol biasa atau tanya (termasuk rekap), jawab di "balasan".
 Jangan pernah tulis @everyone atau @here di "pesan".
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
@@ -256,7 +266,7 @@ class Brain:
 
     async def command(self, text: str, n_attachments: int, mentioned: str, history: str,
                       draft: str, recap: str, deadlines: str = "", replied: str = "", virals: str = "",
-                      campaigns: str = "", announcements: str = "") -> dict:
+                      campaigns: str = "", announcements: str = "", channel_content: str = "") -> dict:
         system = COMMAND_PROMPT.format(
             **self._base(),
             mentioned=mentioned or "(tidak ada)",
@@ -269,6 +279,7 @@ class Brain:
             virals=virals or "(tidak ada)",
             campaigns=campaigns or "(belum ada data)",
             announcements=announcements or "(tidak ada)",
+            channel_content=channel_content or "(admin nggak nyebut channel)",
             year=datetime.date.today().year,
         )
         data = await self._ask(system, text or "(cuma kirim lampiran tanpa teks)", 0.7)

@@ -813,13 +813,19 @@ async def handle_control(message: discord.Message):
             replied += " (ini preview draf terakhir; balasan admin = revisi atau keputusan untuk draf itu)"
 
     try:
+        await asyncio.wait_for(watcher.fetch(), timeout=15)  # biar daftar campaign selalu yang terbaru
+    except Exception as e:
+        log.warning("Gagal ambil data website buat perintah admin: %s", e)
+    channel_content = await channels_content(targets)
+
+    try:
         async with message.channel.typing():
             cmd = await brain.command(
                 message.clean_content, len(message.attachments),
                 ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
                 (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
-                pending_announcements_text())
+                pending_announcements_text(), channel_content)
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -831,6 +837,9 @@ async def handle_control(message: discord.Message):
         return
 
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
+    if cmd["aksi"] == "cek_campaign":
+        await check_campaigns_now(message)
+        return
     if cmd["aksi"] == "cek_viral":
         await check_viral_now(message, [d["slug"] for d in cmd["keputusan"] if d.get("slug")])
         return
@@ -997,10 +1006,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 @tasks.loop(minutes=config.CAMPAIGN_CHECK_MINUTES)
 async def campaign_loop():
     try:
+        await run_campaign_check()
+    except Exception:
+        pass  # sudah dicatat di log; coba lagi putaran berikutnya
+
+
+async def run_campaign_check() -> list[dict]:
+    """Ambil data website, bikin channel buat campaign baru, dan umumkan. Balikin daftar campaign baru."""
+    try:
         new = await watcher.check_new()
     except Exception:
         log.exception("Gagal cek campaign")
-        return
+        raise
     for guild in client.guilds:
         await sync_guild(guild)  # bikin channel diskusi untuk campaign baru
         channels = campaign_channels(guild)
@@ -1014,6 +1031,7 @@ async def campaign_loop():
             except Exception as e:
                 log.exception("Gagal umumkan campaign %s", c["slug"])
                 await alert(f"Gagal umumin campaign baru **{c.get('title')}**: `{e}`")
+    return new
 
 
 async def announce_campaign(channel, c: dict, discussion):
@@ -1170,8 +1188,50 @@ async def check_viral_now(message: discord.Message, slugs: list[str]):
 
 
 def campaign_list() -> str:
-    return "\n".join(f"- {c['slug']}: {c.get('title')} | " + ", ".join(config.CAMPAIGN_ALIASES.get(c["slug"], []))
-                     for c in watcher.campaigns)
+    guild = home_guild()
+    channels = campaign_channels(guild) if guild else {}
+    return "\n".join(
+        f"- {c['slug']}: {c.get('title')} | status {c.get('status')} | dibuat {c.get('createdAt') or '-'} | "
+        f"deadline {c.get('deadline')} | channel diskusi: {'#' + channels[c['slug']].name if c['slug'] in channels else 'BELUM ADA'}"
+        + (" | sering disebut: " + ", ".join(config.CAMPAIGN_ALIASES[c["slug"]]) if c["slug"] in config.CAMPAIGN_ALIASES else "")
+        for c in watcher.campaigns)
+
+
+async def channels_content(targets: list) -> str:
+    """Isi terbaru channel yang disebut admin, biar Minhub nggak ngarang soal isi channel lain."""
+    parts = []
+    for ch in targets[:3]:
+        lines = []
+        try:
+            async for m in ch.history(limit=15):
+                if is_error_message(m):
+                    continue
+                name = config.BOT_NAME if m.author == client.user else m.author.display_name
+                when = (m.created_at + datetime.timedelta(hours=7)).strftime("%d %b %H:%M")
+                lines.append(f"[{when}] {name}: {m.clean_content[:250]}")
+        except discord.HTTPException:
+            lines = ["(nggak bisa baca channel ini)"]
+        parts.append(f"#{ch.name} (paling bawah = terbaru):\n" + "\n".join(reversed(lines)))
+    return "\n\n".join(parts)
+
+
+async def check_campaigns_now(message: discord.Message):
+    """Admin minta cek website sekarang: campaign baru langsung dibikinin channel & diumumkan."""
+    await control_reply(message, "Siap kak, aku cek website campaign sekarang ya")
+    try:
+        new = await asyncio.wait_for(run_campaign_check(), timeout=120)
+    except Exception as e:
+        await control_reply(message, f"Gagal ngecek website: `{type(e).__name__}: {str(e)[:200]}`", error=True)
+        return
+    channels = campaign_channels(message.guild)
+    active = watcher.active()
+    lines = [f"- **{c.get('title')}** (deadline {format_value('deadline', c.get('deadline'))})"
+             + (f" {channels[c['slug']].mention}" if c["slug"] in channels else " (channel belum ada)") for c in active]
+    head = (f"Ada {len(new)} campaign baru, udah aku bikinin channel dan umumin di pengumuman: "
+            + ", ".join(f"**{c.get('title')}**" for c in new) if new
+            else "Nggak ada campaign baru yang belum diumumin, semuanya udah punya channel")
+    await send(message.channel, f"{head}.\nCampaign aktif sekarang ({len(active)}):\n" + "\n".join(lines),
+               reference=message)
 
 
 def pending_virals() -> dict:
@@ -1350,8 +1410,9 @@ async def propose_announcement(guild: discord.Guild, channel, text: str, kind: s
         return
     role = admin_role(guild)
     await send(ctl, f"{role.mention + ' ' if role else ''}{question}", roles=True)
-    preview = await ctl.send(("@everyone " if everyone else "") + tidy(text)[:1900],
-                             allowed_mentions=discord.AllowedMentions.none())
+    shown, embeds = await linkpreview.prepare(("@everyone " if everyone else "") + tidy(text)[:1900])
+    embeds = [await linkpreview.clean_embed(e) for e in embeds]
+    preview = await ctl.send(shown, embeds=embeds, allowed_mentions=discord.AllowedMentions.none())
     ask = await ctl.send("React ✅ kirim, ❌ jangan dikirim. Atau bales pakai chat biasa, misal *oke kirim*, "
                          "*jangan dulu*, atau *revisi jadi ...*.")
     for emoji in ANNOUNCE_REACTIONS:
@@ -1405,7 +1466,9 @@ async def decide_announcement(ask_id: str, decision: str, member, new_text: str 
                     slug=p["slug"], kind_detail=p["kind"])
         await send(ctl, f"Oke, udah aku kirim: {msg.jump_url}", reference=reference)
     else:
-        await send(ctl, "Siap, yang itu nggak aku kirim.", reference=reference)
+        c = watcher.get(p["slug"]) or {"title": p["slug"]}
+        label = {"deadline_h1": "pengingat H-1", "campaign_update": "info perubahan"}.get(p["kind"], "pengumuman")
+        await send(ctl, f"Siap, {label} **{c.get('title')}** nggak aku kirim.", reference=reference)
 
 
 async def ask_deadline(guild: discord.Guild, c: dict, channel):
