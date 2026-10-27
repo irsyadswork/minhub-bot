@@ -15,8 +15,12 @@ Fitur:
 - **Jeda humanis** 5–60 detik dengan status "typing..." sebelum membalas.
 - **Pengumuman campaign baru** di `#pengumuman` (dicek tiap 3 menit): tag @everyone, teks variatif (nama, brand, rate,
   deadline, channel diskusi) + kartu campaign.
-- **Konten viral** dari laporan client (sekali sehari per campaign mulai 19.00 WIB): selalu dengan kartu preview buatan
-  sendiri (thumbnail, caption, akun, platform, views, link). Kalau preview gagal, dilaporkan ke admin dulu.
+- **Konten top views** dari laporan client (sekali sehari per campaign mulai 19.00 WIB), dengan kartu preview buatan
+  sendiri (thumbnail, caption, akun, platform, views, link). Campaign 🟢 dikirim otomatis (admin dikabari);
+  campaign 🟡/🔴 dilewati; kalau preview gambar gagal, minta acc admin dulu. Admin juga bisa minta cek kapan aja.
+- **Deteksi konten janggal**: rasio likes/views yang nggak wajar (curiga suntik views) nggak pernah di-share dan
+  langsung dilaporkan ke `#minhub-control`. Batasnya per platform di `config.py` (`VIRAL_MIN_LIKE_RATIO`).
+- **Tambah laporan lewat chat**: "laporan <campaign>: <link laporan>" di `#minhub-control` (disimpan di `reports.json`).
 - **Pengingat harian 17.00 WIB** di `#diskusi-general`: tag @everyone, teks ditulis AI tiap hari + sisa budget tiap campaign.
   Aktif setelah admin react ✅ di contoh yang dikirim ke `#minhub-control`.
 - **Perintah admin** di `#minhub-control`: misal *"@Minhub di #pengumuman umumin ... + link"*. Channel tujuan diambil dari

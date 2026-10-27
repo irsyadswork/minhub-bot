@@ -79,7 +79,19 @@ REPORTS = {
     "ajaib-cuantalks": "ajaib-cuantalks-batch-5-bnw8d25be6",
     "film-pasukan-1000-janda": "cpfseribujanda3-g7losqt2s0",
     "semanis-drama-tropicana-slim": "istrikontrakxceodinginn-ccajrjyq3o",
+    "todecella": "cpetodecellajakarta-n4yissjuhx",
+    "shopee-11-11": "shopee-11-11-x-no-na-t92qyclpd4",
 }
+# Laporan baru bisa ditambah lewat chat di #minhub-control ("laporan <campaign>: <link>"), disimpan di reports.json.
+
+# Konten dianggap janggal (curiga suntik views) kalau likes/views di bawah batas ini, atau likes 0 padahal views
+# udah >= VIRAL_SUSPICIOUS_MIN_VIEWS. Batas = kira-kira seperlima rasio normal tiap platform dari data laporan.
+VIRAL_MIN_LIKE_RATIO = {"tiktok": 0.0008, "instagram": 0.0013, "youtube": 0.0022, "threads": 0.0003,
+                        "facebook": 0.0008}
+VIRAL_MIN_LIKE_RATIO_DEFAULT = 0.0008
+VIRAL_SUSPICIOUS_MIN_VIEWS = 10_000
+# Top views jam VIRAL_POST_HOUR dikirim otomatis (tanpa acc) cuma untuk campaign yang statusnya 🟢.
+VIRAL_AUTO_SEND = True
 # Nama panggilan campaign yang biasa dipakai member (slug -> alias). Kalau tetap ambigu, Minhub nanya balik.
 CAMPAIGN_ALIASES = {
     "semanis-drama-tropicana-slim": ["dracin", "drama china", "semanis", "tropicana", "istri kontrak"],

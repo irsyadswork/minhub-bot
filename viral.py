@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 import aiohttp
 
 import config
+import store
 
 STATE_FILE = os.path.join(config.DATA_DIR, "viral_state.json")
 REPORT_API = "https://laporan.clipperhub.site/api/laporan/"
@@ -69,8 +70,9 @@ class ViralSharer:
     async def top_summary(self, titles: dict, per_campaign: int = 3) -> str:
         """Ringkasan konten views tertinggi per campaign dari laporan client (dengan link), buat konteks AI.
         Konten yang pernah diganti admin (curiga curang / link mati) nggak ikut."""
-        lines = [f"- {title}: belum ada data laporan" for slug, title in titles.items() if slug not in config.REPORTS]
-        for slug, token in config.REPORTS.items():
+        reports = self.reports()
+        lines = [f"- {title}: belum ada data laporan" for slug, title in titles.items() if slug not in reports]
+        for slug, token in reports.items():
             if slug not in titles:
                 continue
             try:
@@ -94,10 +96,45 @@ class ViralSharer:
             lines.append(f"- {titles[slug]}: total {len(recs)} konten; teratas: " + "; ".join(parts))
         return "\n".join(lines)
 
+    @staticmethod
+    def reports() -> dict:
+        """Semua laporan: bawaan config.REPORTS + yang ditambah lewat chat (reports.json)."""
+        return {**config.REPORTS, **store.load("reports.json", {})}
+
+    @staticmethod
+    def add_report(slug: str, token: str):
+        data = store.load("reports.json", {})
+        data[slug] = token
+        store.save("reports.json", data)
+
+    @staticmethod
+    def suspicion(rec: dict) -> str | None:
+        """Alasan kalau konten keliatan janggal (rasio likes/views nggak wajar), atau None kalau wajar."""
+        views, likes = rec.get("views") or 0, rec.get("likes")
+        if views < config.VIRAL_SUSPICIOUS_MIN_VIEWS or likes is None:
+            return None
+        platform = str(rec.get("platform") or "").lower()
+        limit = config.VIRAL_MIN_LIKE_RATIO.get(platform, config.VIRAL_MIN_LIKE_RATIO_DEFAULT)
+        ratio = likes / views
+        if likes == 0 or ratio < limit:
+            return (f"{_views(views)} views tapi likes cuma {likes} ({ratio:.2%}), "
+                    f"normalnya di {PLATFORM_NAMES.get(platform, platform or 'platform ini')} minimal sekitar {limit:.2%}")
+        return None
+
+    def flag(self, slug: str, link: str) -> bool:
+        """Catat konten janggal. Balikin True kalau baru pertama kali ketahuan (biar alert-nya nggak dobel)."""
+        st = self._st(slug)
+        if link in st["flagged"]:
+            return False
+        st["flagged"].append(link)
+        self._save()
+        return True
+
     def _st(self, slug: str) -> dict:
         st = self.state.setdefault(slug, {"shared": [], "since": today_wib().isoformat(), "last_big": None,
                                           "last_day": None})
         st.setdefault("rejected", [])
+        st.setdefault("flagged", [])
         return st
 
     def done_today(self, slug: str) -> bool:

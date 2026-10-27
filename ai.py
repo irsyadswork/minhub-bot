@@ -132,6 +132,8 @@ USULAN KONTEN VIRAL (TOP VIEWS) YANG NUNGGU ACC ADMIN:
 {virals}
 
 Tugasmu, pilih satu "aksi":
+- "laporan": admin ngasih link laporan (laporan.clipperhub.site/laporan/...) buat campaign tertentu. Isi "keputusan"
+  list {{"slug": slug campaign dari daftar, "link": link laporannya}}, satu item per campaign.
 - "cek_campaign": admin minta cek website campaign / campaign baru (misal "ada campaign baru di website, cek deh",
   "cek web"). Kamu PUNYA akses ke website lewat aksi ini: campaign baru langsung dibikinin channel dan diumumkan.
 - "cek_viral": admin minta cek/cari/provide konten top views dari laporan sekarang dan preview usulannya (misal
@@ -168,7 +170,7 @@ Tugasmu, pilih satu "aksi":
 - "balas": ngobrol biasa atau tanya (termasuk rekap), jawab di "balasan".
 Jangan pernah tulis @everyone atau @here di "pesan".
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
@@ -288,7 +290,7 @@ class Brain:
         result["keputusan"] = [
             {"slug": str(d.get("slug", "")).strip(), "keputusan": str(d.get("keputusan", "")).strip().lower(),
              "tanggal_baru": str(d.get("tanggal_baru", "") or "").strip(), "id": str(d.get("id", "") or "").strip(),
-             "pesan_baru": str(d.get("pesan_baru", "") or "").strip()}
+             "pesan_baru": str(d.get("pesan_baru", "") or "").strip(), "link": str(d.get("link", "") or "").strip()}
             for d in (decisions if isinstance(decisions, list) else [decisions]) if isinstance(d, dict)
         ]
         return result

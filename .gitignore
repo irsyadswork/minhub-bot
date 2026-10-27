@@ -24,3 +24,4 @@ announce_pending.json
 # State awal buat server baru (misal Volume Railway) - boleh ikut ke GitHub
 !seed_state/
 !seed_state/*
+reports.json
