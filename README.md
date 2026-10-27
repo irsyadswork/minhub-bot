@@ -35,19 +35,22 @@ Keamanan & monitoring:
 
 Butuh: Server Members Intent + Message Content Intent ON (Developer Portal). Izin role Minhub lihat bagian "Izin bot".
 
-## Hosting 24/7 (Wispbyte) & cara update
-Bot jalan di Wispbyte (server `5579c560`), kodenya ditarik dari repo GitHub ini (branch `main`).
-1. Ubah kode di PC → `git commit` → `git push`.
-2. Buka https://wispbyte.com/client/servers/5579c560/github → **Pull** → **Pull Changes**.
-   Ini menarik kode terbaru lalu menyalakan ulang bot. (Tombol Restart biasa TIDAK menarik kode baru.)
-3. Cek `#minhub-control`: Minhub kirim "nyala lagi di Wispbyte (versi `xxxxxxx`)". Versi itu harus sama dengan
+## Hosting 24/7 (Railway) & cara update
+Bot jalan di Railway (paket Hobby), service-nya terhubung ke repo GitHub ini (branch `main`).
+1. Ubah kode di PC → `git commit` → `git push`. Railway otomatis build & deploy ulang.
+2. Cek `#minhub-control`: Minhub kirim "nyala lagi di **Railway** (versi `xxxxxxx`)". Versi itu harus sama dengan
    commit terakhir di GitHub.
 
+Setting di Railway (sekali aja):
+- **Variables**: `DISCORD_TOKEN`, `GEMINI_API_KEY`, dan `DATA_DIR=/data`. Token tidak ada di GitHub.
+- **Volume** di-mount ke `/data`: tempat file state (riwayat konten, usulan yang nunggu acc, log). Tanpa Volume,
+  data hilang tiap deploy. Pertama kali nyala, isi `seed_state/` disalin ke situ.
+- `railway.json` mengatur perintah start (`python bot.py`) dan auto-restart.
+
 Catatan:
-- `.env` (token) tidak ada di GitHub; file itu di-upload manual sekali ke Files Wispbyte.
-- Server Wispbyte nggak "tidur" walau sepi (beda dengan Replit/Render gratis), jadi nggak perlu keep-alive ping.
-  Yang bikin mati cuma: nggak login ke Wispbyte 2 minggu (Minhub ngingetin tiap 12 hari) atau crash (dilaporkan).
-- Jangan jalankan bot di PC bersamaan dengan Wispbyte (balasan jadi dobel).
+- Minhub cuma boleh nyala di satu tempat. Server Wispbyte lama dimatikan (jangan di-Start lagi), dan jangan
+  jalankan bot di PC bersamaan dengan Railway (balasan jadi dobel).
+- Kalau koneksi ke Discord putus (misal IP diblokir), penjaga di `bot.py` nyoba login lagi sendiri.
 
 ## Izin bot (seminimal mungkin)
 - Server-wide (role Minhub): View Channels, Send Messages, Embed Links, Attach Files, Read Message History,

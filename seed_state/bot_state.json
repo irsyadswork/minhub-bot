@@ -1,0 +1,8 @@
+{
+ "clean_stop": null,
+ "daily": {
+  "enabled": true,
+  "last": "2026-10-26"
+ },
+ "heartbeat": "2026-10-27T10:16:53+07:00"
+}

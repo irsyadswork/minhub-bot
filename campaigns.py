@@ -8,7 +8,7 @@ import discord
 
 import config
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen_campaigns.json")
+STATE_FILE = os.path.join(config.DATA_DIR, "seen_campaigns.json")
 STATUS_EMOJI = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
 # Field yang dipantau perubahannya (dikabarkan di channel campaign-nya)
 TRACKED = {

@@ -4,6 +4,12 @@ Channel & role dicari pakai ID dulu (aman walau di-rename). Nama cuma cadangan k
 Cara ambil ID: Discord > Settings > Advanced > Developer Mode ON, lalu klik kanan channel > Copy Channel ID.
 """
 
+import os
+
+# --- Lokasi file state (data runtime). Di Railway diisi lewat variabel DATA_DIR = folder Volume (misal /data),
+# biar data nggak hilang tiap deploy. Kalau kosong, pakai folder bot ini. ---
+DATA_DIR = os.environ.get("DATA_DIR") or os.path.dirname(os.path.abspath(__file__))
+
 SERVER_NAME = "Clipper Hub Circle"
 BOT_NAME = "Minhub"
 CAMPAIGN_SITE = "https://campaign.clipperhub.site"

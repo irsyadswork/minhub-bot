@@ -14,7 +14,7 @@ import aiohttp
 
 import config
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viral_state.json")
+STATE_FILE = os.path.join(config.DATA_DIR, "viral_state.json")
 REPORT_API = "https://laporan.clipperhub.site/api/laporan/"
 WIB = timezone(timedelta(hours=7))
 

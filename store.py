@@ -1,13 +1,32 @@
 """Penyimpanan kecil berbasis file: state JSON, log event (buat rekap), dan log aktivitas (siapa/kapan/apa)."""
 import json
 import os
+import shutil
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+import config
+
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = config.DATA_DIR
 WIB = timezone(timedelta(hours=7))
-EVENTS_FILE = os.path.join(HERE, "events.jsonl")
-ACTIVITY_FILE = os.path.join(HERE, "activity.jsonl")
+EVENTS_FILE = os.path.join(DATA, "events.jsonl")
+ACTIVITY_FILE = os.path.join(DATA, "activity.jsonl")
+
+
+def _seed():
+    """Pertama kali jalan di tempat baru (misal Volume Railway kosong): salin state awal dari seed_state/."""
+    os.makedirs(DATA, exist_ok=True)
+    seed_dir = os.path.join(HERE, "seed_state")
+    if not os.path.isdir(seed_dir) or os.path.abspath(seed_dir) == os.path.abspath(DATA):
+        return
+    for name in os.listdir(seed_dir):
+        target = os.path.join(DATA, name)
+        if not os.path.exists(target):
+            shutil.copyfile(os.path.join(seed_dir, name), target)
+
+
+_seed()
 
 EVENT_LABELS = {
     "member_join": "member join",
@@ -27,7 +46,7 @@ def now_wib() -> datetime:
 
 
 def load(name: str, default):
-    path = os.path.join(HERE, name)
+    path = os.path.join(DATA, name)
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
@@ -36,7 +55,7 @@ def load(name: str, default):
 
 
 def save(name: str, data):
-    path = os.path.join(HERE, name)
+    path = os.path.join(DATA, name)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, ensure_ascii=False)

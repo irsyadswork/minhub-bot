@@ -314,6 +314,8 @@ async def guard_guild(guild: discord.Guild) -> bool:
 
 
 def host_label() -> str:
+    if os.environ.get("RAILWAY_ENVIRONMENT"):
+        return "Railway"
     return "Wispbyte" if os.path.isdir("/home/container") else f"PC/host lain ({socket.gethostname()})"
 
 
@@ -493,7 +495,7 @@ async def announce_startup(previous: dict):
     store.save("bot_state.json", state)
     store.activity(kind="startup", host=host_label(), version=git_version())
     await alert(f"Minhub nyala lagi di **{host_label()}** (versi `{git_version()}`). {why}\n"
-                f"Kalau host-nya bukan Wispbyte, berarti ada Minhub dobel yang jalan, matikan salah satunya ya.",
+                f"Minhub cuma boleh nyala di satu tempat (sekarang Railway). Kalau ada yang nyala juga di Wispbyte atau PC, matikan yang itu ya.",
                 cooldown=False)
 
 
@@ -1049,7 +1051,7 @@ async def announce_campaign(channel, c: dict, discussion):
 
 
 VIRAL_PENDING = "viral_pending.json"   # id pesan usulan di #minhub-control -> usulan konten viral yang nunggu acc
-VIRAL_CACHE = os.path.join(HERE, ".viral_cache")
+VIRAL_CACHE = os.path.join(config.DATA_DIR, ".viral_cache")
 VIRAL_REACTIONS = {"✅": "kirim", "🔁": "ganti", "❌": "skip"}
 
 
@@ -1591,12 +1593,14 @@ async def daily_loop():
     store.event("reminder_sent", channel=channel.name)
 
 
-REMINDER_FILE = os.path.join(HERE, "reminder_state.json")
+REMINDER_FILE = os.path.join(config.DATA_DIR, "reminder_state.json")
 
 
 @tasks.loop(hours=6)
 async def reminder_loop():
     """Tiap LOGIN_REMINDER_DAYS hari, ingatkan admin login ke Wispbyte biar server gratisnya nggak dimatikan."""
+    if host_label() != "Wispbyte":
+        return  # cuma perlu kalau jalan di Wispbyte gratis
     today = datetime.date.today()
     last = None
     if os.path.exists(REMINDER_FILE):
