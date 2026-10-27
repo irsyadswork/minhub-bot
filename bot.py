@@ -495,7 +495,7 @@ async def announce_startup(previous: dict):
     store.save("bot_state.json", state)
     store.activity(kind="startup", host=host_label(), version=git_version())
     await alert(f"Minhub nyala lagi di **{host_label()}** (versi `{git_version()}`). {why}\n"
-                f"Minhub cuma boleh nyala di satu tempat (sekarang Railway). Kalau ada yang nyala juga di Wispbyte atau PC, matikan yang itu ya.",
+                f"Minhub cuma boleh nyala di satu tempat (sekarang {host_label()}). Kalau ada yang nyala juga di tempat lain, matikan yang itu ya.",
                 cooldown=False)
 
 
@@ -521,7 +521,10 @@ async def on_member_join(member: discord.Member):
         log.warning("Channel welcome '%s' tidak ketemu", config.WELCOME_CHANNEL)
         return
     try:
-        avatar = await member.display_avatar.replace(format="png", size=256).read()
+        try:
+            avatar = await member.display_avatar.replace(format="png", size=256).read()
+        except discord.HTTPException:
+            avatar = await member.default_avatar.read()  # foto profil gagal diunduh: pakai avatar default
         card = await asyncio.to_thread(make_welcome_card, avatar, member.name)
         text = random.choice(texts.WELCOME).format(mention=member.mention, server=config.SERVER_NAME)
         await send(channel, text, files=[discord.File(card, "welcome.png")], users=True)
@@ -751,7 +754,7 @@ async def recover_control(guild: discord.Guild, since: datetime.datetime):
     for m in messages:
         if not m.author.bot and m.id not in answered and is_admin(m.author):
             log.info("Proses perintah admin yang ketinggalan: %s", m.content[:80])
-            await handle_control(m)
+            asyncio.create_task(handle_control(m))  # jalan terpisah: nunggu ✅ preview nggak nahan langkah lain
 
 
 async def recover_unanswered(guild: discord.Guild, since: datetime.datetime):
@@ -895,24 +898,27 @@ async def handle_control(message: discord.Message):
         return
     target = targets[0] if targets else (message.guild.get_channel(draft["channel_id"])
                                          if draft and draft.get("channel_id") else None)
+    everyone = cmd.get("everyone", False)
     drafts[author.id] = {"text": text, "source": source, "channel_id": target.id if target else None,
                          "channel": target.name if target else None, "t": time.monotonic(),
-                         "version": (draft or {}).get("version", 0) + 1, "preview_ids": []}
+                         "version": (draft or {}).get("version", 0) + 1, "preview_ids": [], "everyone": everyone}
 
     if cmd["aksi"] == "kirim" and not target:
         await control_reply(message, "Mau dikirim ke channel mana? Sebut channel-nya ya, misal #pengumuman.")
         return
     try:
-        await preview_and_send(message, text, source, target)
+        await preview_and_send(message, text, source, target, everyone)
     except discord.HTTPException as e:
         log.exception("Gagal kirim/preview perintah admin")
         await control_reply(message, f"Gagal kirim: `{type(e).__name__} {e.status}: {e.text[:300]}`", error=True)
 
 
-async def preview_and_send(message: discord.Message, text: str, source, target):
+async def preview_and_send(message: discord.Message, text: str, source, target, everyone: bool = False):
     guild = message.guild
     _, mentions = build_refs(guild)
-    text = fill_mentions(tidy(text), mentions)[:1900]
+    text = fill_mentions(tidy(text, words=False), mentions)[:1900]  # kalimat dari admin: kata-katanya dihormati
+    if everyone:
+        text = "@everyone " + text  # di preview nggak nge-ping (allowed_mentions none), baru nge-ping pas dikirim
     text, embeds = await linkpreview.prepare(text)
     embeds = [await linkpreview.clean_embed(e) for e in embeds]
 
@@ -958,7 +964,7 @@ async def preview_and_send(message: discord.Message, text: str, source, target):
         return
 
     sent = await target.send(text or None, embeds=embeds, files=await files(),
-                             allowed_mentions=discord.AllowedMentions.none())
+                             allowed_mentions=discord.AllowedMentions(everyone=everyone, users=False, roles=False))
     drafts.pop(message.author.id, None)
     await send(confirm.channel, f"Terkirim: {sent.jump_url}", reference=confirm)
     store.activity(kind="admin_send", user=str(message.author), user_id=message.author.id, channel=target.name,
@@ -1023,8 +1029,14 @@ async def run_campaign_check() -> list[dict]:
     except Exception:
         log.exception("Gagal cek campaign")
         raise
+    if new:
+        log.info("Campaign baru: %s", ", ".join(c["slug"] for c in new))
     for guild in client.guilds:
-        await sync_guild(guild)  # bikin channel diskusi untuk campaign baru
+        try:
+            await asyncio.wait_for(sync_guild(guild), timeout=120)  # bikin channel diskusi untuk campaign baru
+        except Exception as e:
+            log.exception("Sinkron channel campaign gagal")
+            await alert(f"Gagal bikin/sinkron channel campaign: `{type(e).__name__}: {str(e)[:200]}`", key="sync")
         channels = campaign_channels(guild)
         for c in new:
             channel = get_channel(guild, config.CAMPAIGN_CHANNEL_ID, config.CAMPAIGN_CHANNEL)
@@ -1032,10 +1044,12 @@ async def run_campaign_check() -> list[dict]:
                 log.warning("Channel campaign '%s' tidak ketemu di %s", config.CAMPAIGN_CHANNEL, guild)
                 continue
             try:
-                await announce_campaign(channel, c, channels.get(c["slug"]))
+                await asyncio.wait_for(announce_campaign(channel, c, channels.get(c["slug"])), timeout=120)
+                watcher.mark_seen([c["slug"]])
             except Exception as e:
                 log.exception("Gagal umumkan campaign %s", c["slug"])
-                await alert(f"Gagal umumin campaign baru **{c.get('title')}**: `{e}`")
+                await alert(f"Gagal umumin campaign baru **{c.get('title')}**, aku coba lagi nanti: `{e}`",
+                            key=f"announce:{c['slug']}")
     return new
 
 
@@ -1395,6 +1409,7 @@ async def decide_viral(ask_id: str, decision: str, member, new_text: str = "", r
 @tasks.loop(minutes=config.STATUS_CHECK_MINUTES)
 async def status_loop():
     """Status sisa budget di nama channel campaign (🟢/🟡/🔴), update data campaign, dan pengingat deadline."""
+    log.info("Cek status campaign mulai")
     try:
         await watcher.fetch()
     except Exception as e:
@@ -1409,18 +1424,28 @@ async def status_loop():
     status, snap, sent = state.setdefault("status", {}), state.setdefault("snap", {}), state.setdefault("deadline_sent", {})
     changes, summary = [], []
 
+    closed = state.setdefault("closed", {})
+    today = store.now_wib().date().isoformat()
     for slug, ch in channels.items():
         c = watcher.get(slug)
+        ended = (c is None or c.get("status", "aktif") != "aktif" or (c.get("deadline") or "9999") < today
+                 or (closed.get(slug) and closed.get(slug) == c.get("deadline")))
         pct = watcher.remaining_pct(c) if c else None
-        st = watcher.budget_status(pct)
+        st = "red" if ended else watcher.budget_status(pct)
         if not st:
             continue
-        summary.append(f"{STATUS_EMOJI[st]} {c.get('title')}: sisa {watcher.pct_text(pct)}")
-        want = watcher.channel_name(c, st)
+        title = c.get("title") if c else slug
+        info = "selesai" if ended else f"sisa {watcher.pct_text(pct)}"
+        summary.append(f"{STATUS_EMOJI[st]} {title}: {info}")
+        want = (STATUS_EMOJI[st] + config.CAMPAIGN_CHANNEL_SEPARATOR + slug)[:100]
         if ch.name != want:
             try:
-                await ch.edit(name=want, reason=f"Minhub: sisa budget {watcher.pct_text(pct)}")
+                log.info("Ganti nama #%s -> %s", ch.name, want)
+                await asyncio.wait_for(ch.edit(name=want, reason=f"Minhub: {info}"), timeout=60)
                 await asyncio.sleep(2)
+            except (asyncio.TimeoutError, discord.RateLimited):
+                log.warning("Ganti nama #%s ketahan rate limit Discord, dicoba lagi putaran berikutnya", ch.name)
+                continue  # status belum dicatat, jadi diulang nanti
             except discord.Forbidden:
                 await alert("Aku nggak bisa ganti nama channel campaign: izin **Manage Channels** di kategori "
                             "Diskusi Campaign belum ada.", key="perm:rename")
@@ -1430,11 +1455,10 @@ async def status_loop():
         if prev != st:
             status[slug] = st
             if prev:
-                changes.append(f"{STATUS_EMOJI[prev]} → {STATUS_EMOJI[st]} **{c.get('title')}** "
-                               f"(sisa {watcher.pct_text(pct)}) {ch.mention}")
+                changes.append(f"{STATUS_EMOJI[prev]} → {STATUS_EMOJI[st]} **{title}** ({info}) {ch.mention}")
                 if st == "red":
-                    await send(ch, texts.BUDGET_RED.format(title=c.get("title")))
-                    store.event("status_alert_sent", slug=slug, status=st)
+                    await send(ch, (texts.CAMPAIGN_ENDED if ended else texts.BUDGET_RED).format(title=title))
+                    store.event("status_alert_sent", slug=slug, status=st, ended=bool(ended))
 
     if first_run and summary:
         await alert("Status budget di nama channel campaign udah aktif:\n" + "\n".join(summary), cooldown=False)
@@ -1442,6 +1466,7 @@ async def status_loop():
         await alert("Status budget campaign berubah:\n" + "\n".join(changes), cooldown=False)
         store.event("status_alert_sent", count=len(changes))
     store.save("campaign_state.json", state)
+    log.info("Cek status campaign: %d berubah", len(changes))
 
     # Perubahan data campaign -> kabari di channel campaign itu (bukan di #pengumuman)
     for c in watcher.campaigns:
@@ -1623,6 +1648,9 @@ async def decide_deadline(message: discord.Message, slug: str, decision: str, ne
         else f"Hari ini hari terakhir **{c.get('title')}**."
     msg = await send(channel, "@everyone " + text, everyone=True)
     store.event("deadline_reminder_sent", slug=slug, reminder="H")
+    state = store.load("campaign_state.json", {})
+    state.setdefault("closed", {})[slug] = c.get("deadline")
+    store.save("campaign_state.json", state)
     await control_reply(message, f"Oke, closed sesuai deadline. Udah aku umumin di {where}: {msg.jump_url}")
 
 

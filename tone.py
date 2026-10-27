@@ -22,10 +22,11 @@ _EMOJI = re.compile(
 )
 
 
-def tidy(text: str) -> str:
+def tidy(text: str, words: bool = True) -> str:
+    """words=False: kata nggak disaring (misal admin sendiri yang minta "halo gais"), emoji tetap disaring."""
     if not text:
         return text
-    for pattern, repl in _WORDS:
+    for pattern, repl in (_WORDS if words else []):
         text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
 
     kept = False

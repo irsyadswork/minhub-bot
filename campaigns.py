@@ -83,10 +83,20 @@ class CampaignWatcher:
                 seen = set(json.load(f))
 
         new = [c for c in self.campaigns if c["slug"] not in seen and c.get("status", "aktif") == "aktif"]
-        seen |= {c["slug"] for c in self.campaigns}
+        if first_run:  # pertama kali: semua campaign aktif yang udah ada dianggap lama (nggak diumumkan)
+            self.mark_seen([c["slug"] for c in new])
+            return []
+        return new
+
+    def mark_seen(self, slugs: list[str]):
+        """Tandai campaign udah diumumkan. Dipanggil SETELAH pengumumannya berhasil terkirim."""
+        seen = set()
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, encoding="utf-8") as f:
+                seen = set(json.load(f))
+        seen |= set(slugs)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(sorted(seen), f, indent=2)
-        return [] if first_run else new
 
     def active(self) -> list[dict]:
         return [c for c in self.campaigns if c.get("status", "aktif") == "aktif"]

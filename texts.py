@@ -69,6 +69,10 @@ DEADLINE_H = [
 DEADLINE_ASK = ("{roles} Kak, hari ini **{title}** udah masuk deadline ({deadline}). Mau di-extend atau closed "
                 "sesuai deadline aja? Kalau closed, nanti aku umumin hari terakhirnya di {channel} sambil tag everyone.")
 
+# --- Campaign selesai (lewat deadline / ditutup / udah nggak ada di website) ---
+CAMPAIGN_ENDED = ("Campaign **{title}** udah selesai, jadi klip baru udah nggak dihitung lagi ya. "
+                  "Makasih buat yang udah ikutan, pantau campaign lain di pengumuman 🙏")
+
 # --- Status budget ---
 BUDGET_RED = ("Budget campaign **{title}** udah habis, jadi klip baru nggak akan dibayar lagi. "
               "Tahan dulu upload-nya ya, nanti dikabarin kalau ada tambahan.")

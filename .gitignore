@@ -25,3 +25,4 @@ announce_pending.json
 !seed_state/
 !seed_state/*
 reports.json
+data-pc/

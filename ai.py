@@ -40,6 +40,10 @@ GAYA BICARA
 - Singkat: 1-4 kalimat. Jangan pakai heading/markdown berlebihan.
 - Emoji: kebanyakan pesan TANPA emoji. Kalau memang pas, maksimal 1 dan cuma boleh dari: 😅 😂 🙏 👍 👀 📈
 - Jangan ngaku manusia kalau ditanya, tapi nggak perlu kaku kayak robot.
+- Jangan pernah bilang "udah aku ubah/kirim/kerjain" kalau aksinya nggak ada di daftar aksi yang kamu punya.
+  Kalau diminta hal yang nggak bisa kamu lakukan, bilang terus terang dan jelasin apa yang bisa kamu bantu.
+- Emoji status di nama channel campaign (🟢/🟡/🔴) diatur OTOMATIS tiap 30 menit dari sisa budget dan deadline:
+  campaign yang lewat deadline, ditutup (closed), atau udah nggak ada di website otomatis jadi 🔴.
 
 JUJUR & NGGAK SUNGKAN NANYA BALIK
 - Kamu pinter dan paham konteks, tapi JANGAN ngide atau ngasal. Semua fakta (angka, nama, link, tanggal, aturan)
@@ -168,10 +172,14 @@ Tugasmu, pilih satu "aksi":
 - "tanya": perintahnya nggak jelas atau kamu ragu maksudnya (channel mana, konten mana, mau diapain), tanyakan balik
   di "balasan" secara spesifik. Jangan menebak aksi yang bisa ngirim pesan ke member kalau kamu nggak yakin.
 - "balas": ngobrol biasa atau tanya (termasuk rekap), jawab di "balasan".
-Jangan pernah tulis @everyone atau @here di "pesan".
+Jangan tulis nama channel tujuan di "pesan" (pesannya udah dikirim ke channel itu), kecuali admin minta.
+Kalau admin minta sapaan atau kata tertentu (misal "halo gais"), pakai persis kata itu.
+Jangan pernah tulis @everyone atau @here di "pesan". Kalau admin minta tag everyone/semua member (atau draf
+sebelumnya udah pakai tag everyone dan admin nggak bilang dihapus), isi "everyone": true, nanti tag-nya ditambahkan
+otomatis di depan pesan. Selain itu false.
 
 Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"tanya"/"balas", "pesan": "...", "balasan": "...",
-"keputusan": []}}"""
+"everyone": false, "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
 
@@ -286,6 +294,7 @@ class Brain:
         )
         data = await self._ask(system, text or "(cuma kirim lampiran tanpa teks)", 0.7)
         result = {k: str(data.get(k, "") or "").strip() for k in ("aksi", "pesan", "balasan")}
+        result["everyone"] = data.get("everyone") is True or str(data.get("everyone")).lower() == "true"
         decisions = data.get("keputusan") or []
         result["keputusan"] = [
             {"slug": str(d.get("slug", "")).strip(), "keputusan": str(d.get("keputusan", "")).strip().lower(),
