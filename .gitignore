@@ -26,3 +26,5 @@ announce_pending.json
 !seed_state/*
 reports.json
 data-pc/
+memory.json
+memory_pending.json

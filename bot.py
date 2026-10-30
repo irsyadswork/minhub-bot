@@ -42,6 +42,7 @@ from dotenv import load_dotenv
 
 import config
 import linkpreview
+import memory
 import store
 import texts
 from ai import AIBusy, Brain
@@ -233,11 +234,30 @@ async def recent_history(message: discord.Message, limit: int = config.HISTORY_M
             if is_error_message(m):
                 continue
             name = config.BOT_NAME if m.author == client.user else m.author.display_name
-            text = m.clean_content[:300] or ("[kirim lampiran]" if m.attachments else "[embed]" if m.embeds else "")
+            text = m.clean_content[:300] or ("" if m.attachments else "[embed]" if m.embeds else "")
+            if m.attachments:
+                kind = "gambar" if any((a.content_type or "").startswith("image/") for a in m.attachments) else "file"
+                text = f"{text} [kirim {kind}]".strip()
             lines.append(f"{name}: {text}")
     except discord.HTTPException:
         pass
     return "\n".join(reversed(lines))
+
+
+async def read_images(message: discord.Message) -> list[tuple[bytes, str]]:
+    """Gambar yang dilampirkan di pesan (buat dibaca AI). Yang kegedean/bukan gambar dilewati."""
+    images = []
+    for a in message.attachments:
+        mime = (a.content_type or "").split(";")[0]
+        if not mime.startswith("image/") or a.size > config.MAX_IMAGE_MB * 1024 * 1024:
+            continue
+        try:
+            images.append((await a.read(), mime))
+        except discord.HTTPException as e:
+            log.warning("Gagal baca gambar %s: %s", a.filename, e)
+        if len(images) >= config.MAX_IMAGES:
+            break
+    return images
 
 
 # ---------- kirim pesan (semua teks lewat sini: tone + preview link aman) ----------
@@ -556,6 +576,10 @@ async def on_message(message: discord.Message):
     general = is_channel(base, config.GENERAL_CHANNEL_ID, config.GENERAL_CHANNEL)
     legacy = any(w.lower() in base.name.lower() for w in config.REPLY_CHANNELS)
 
+    if (is_admin(message.author) and (slug or general) and isinstance(ref, discord.Message)
+            and not ref.author.bot and not is_admin(ref.author)):
+        asyncio.create_task(propose_note(message, ref, base))
+
     if mentioned:
         if not (slug or general or legacy):
             return
@@ -612,7 +636,9 @@ QUEUE_MAX_HOURS = 3                      # lewat dari ini nyerah: minta admin ba
 
 async def ask_ai(message: discord.Message, base, slug, mentioned: bool) -> tuple[dict, dict]:
     """Minta jawaban ke Gemini. Balikin (hasil, mentions)."""
-    question = re.sub(rf"<@!?{client.user.id}>", "", message.content).strip() or "(cuma nge-tag kamu tanpa pertanyaan)"
+    images = await read_images(message)
+    question = re.sub(rf"<@!?{client.user.id}>", "", message.content).strip() or (
+        "(kirim gambar tanpa teks)" if images else "(cuma nge-tag kamu tanpa pertanyaan)")
     campaign = watcher.get(slug) if slug else None
     refs, mentions = build_refs(message.guild, campaign)
     history = await recent_history(message)
@@ -622,7 +648,8 @@ async def ask_ai(message: discord.Message, base, slug, mentioned: bool) -> tuple
         log.warning("Gagal ambil ringkasan laporan: %s", e)
         reports = ""
     result = await brain.reply(question, message.author.display_name, refs, watcher.summary(),
-                               watcher.detail(campaign) if campaign else "", history, mentioned, reports)
+                               watcher.detail(campaign) if campaign else "", history, mentioned, reports,
+                               memory.text(), images)
     return result, mentions
 
 
@@ -805,13 +832,16 @@ async def handle_control(message: discord.Message):
 
     # Admin nge-reply pesan Minhub: isi pesan itu ikut jadi konteks (biar "ini ke #channel" nyambung)
     ref = message.reference.resolved if message.reference else None
-    replied, reply_viral, reply_announce = "", None, None
+    replied, reply_viral, reply_announce, reply_note = "", None, None, None
     if isinstance(ref, discord.Message) and ref.author == client.user:
         replied = ref.clean_content[:600] + (f" [kartu: {ref.embeds[0].title}]" if ref.embeds else "")
         reply_viral = viral_ask_for(ref.id)
         reply_announce = announce_ask_for(ref.id)
+        reply_note = str(ref.id) if str(ref.id) in memory.pending() else None
         if reply_viral:
             replied += f" (ini usulan konten viral id {reply_viral})"
+        elif reply_note:
+            replied += f" (ini usulan catatan id {reply_note})"
         elif reply_announce:
             replied += f" (ini usulan pengumuman id {reply_announce})"
         elif draft and ref.id in draft.get("preview_ids", ()):
@@ -830,7 +860,8 @@ async def handle_control(message: discord.Message):
                 ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
                 (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
-                pending_announcements_text(), channel_content)
+                pending_announcements_text(), channel_content, memory.text(with_ids=True), memory.pending_text(),
+                await read_images(message))
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -876,6 +907,31 @@ async def handle_control(message: discord.Message):
                 log.exception("Gagal proses keputusan konten viral")
                 await control_reply(message, f"Gagal kirim: `{type(e).__name__} {e.status}: {e.text[:300]}`",
                                     error=True)
+        return
+    if cmd["aksi"] == "ingat":
+        saved = [memory.add(d["catatan"], str(author)) for d in cmd["keputusan"] if d["catatan"]]
+        if not saved:
+            await control_reply(message, cmd["balasan"] or "Yang mau aku inget apa kak? Tulis faktanya ya.")
+            return
+        store.activity(kind="memory_add", user=str(author), user_id=author.id, notes=[n["text"] for n in saved])
+        await control_reply(message, "Oke, aku inget:\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in saved))
+        return
+    if cmd["aksi"] == "lupa":
+        ids = [int(d["id"]) for d in cmd["keputusan"] if d["id"].isdigit()]
+        gone = memory.remove(ids)
+        if not gone:
+            await control_reply(message, cmd["balasan"] or "Catatan yang mana kak? Sebut nomornya ya.")
+            return
+        store.activity(kind="memory_remove", user=str(author), user_id=author.id, notes=[n["text"] for n in gone])
+        await control_reply(message, "Oke, udah aku lupain:\n" + "\n".join(f"- {n['text']}" for n in gone))
+        return
+    if cmd["aksi"] == "catatan":
+        decided = [d for d in cmd["keputusan"] if d["keputusan"] in ("simpan", "skip")]
+        if not decided:
+            await control_reply(message, cmd["balasan"] or "Usulan catatannya mau disimpan atau nggak kak?")
+        for d in decided:
+            ask_id = d["id"] if d["id"] in memory.pending() else reply_note
+            await decide_note(ask_id, d["keputusan"], author, d["pesan_baru"], reference=message)
         return
     decisions = [d for d in cmd["keputusan"] if d["keputusan"] in ("closed", "extend")]
     if cmd["aksi"] == "deadline" and decisions:
@@ -984,6 +1040,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if decision and is_admin(member):
             await decide_announcement(str(payload.message_id), decision, member)
         return
+    if str(payload.message_id) in memory.pending():
+        decision = NOTE_REACTIONS.get(str(payload.emoji))
+        if decision and is_admin(member):
+            await decide_note(str(payload.message_id), decision, member)
+        return
     if str(payload.message_id) in pending_virals():
         decision = VIRAL_REACTIONS.get(str(payload.emoji))
         if decision and is_admin(member):
@@ -1010,6 +1071,51 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         note = " Tapi role Minhub belum punya izin **Mention Everyone** di channel itu, tolong ditambahin ya."
     await alert(f"Sip, pengingat harian aktif. Aku kirim ke {channel.mention if channel else '#diskusi-general'} "
                 f"tiap jam {config.DAILY_REMINDER_HOUR}.00 WIB.{note}", cooldown=False)
+
+
+# ---------- ingatan: jawaban admin ke member jadi catatan (setelah di-acc) ----------
+
+NOTE_REACTIONS = {"✅": "simpan", "❌": "skip"}
+
+
+async def propose_note(message: discord.Message, question: discord.Message, base):
+    """Admin bales pertanyaan member: kalau jawabannya info umum, usulin jadi catatan di channel kontrol."""
+    q, a = question.clean_content.strip(), message.clean_content.strip()
+    if len(a) < 15 or not QUESTION_HINT.search(q.lower()):
+        return
+    try:
+        note = await brain.learn(q[:600], a[:800], f"#{base.name}", memory.text())
+    except Exception as e:
+        log.warning("Gagal ngeringkas jawaban admin jadi catatan: %s", e)
+        return
+    ctl = control_channel(message.guild)
+    if not note or not ctl:
+        return
+    ask = await send(ctl, f"{message.author.display_name} barusan jawab member di {base.mention} ({message.jump_url}):\n"
+                          f"> {q[:300]}\n> **{message.author.display_name}:** {a[:400]}\n\n"
+                          f"Mau aku inget buat jawab member lain? Usulan catatannya:\n**{note}**\n"
+                          f"React ✅ simpan, ❌ nggak usah. Atau bales pakai revisinya.", raw=True)
+    for emoji in NOTE_REACTIONS:
+        await ask.add_reaction(emoji)
+    pending = memory.pending()
+    pending[str(ask.id)] = {"text": note, "source": message.jump_url, "by": str(message.author)}
+    memory.save_pending(pending)
+
+
+async def decide_note(ask_id: str | None, decision: str, member, new_text: str = "", reference=None):
+    pending = memory.pending()
+    p = pending.pop(str(ask_id), None)
+    ctl = control_channel(home_guild())
+    if not p:
+        await send(ctl, "Usulan catatan itu udah nggak aktif (mungkin udah diputusin).", reference=reference)
+        return
+    memory.save_pending(pending)
+    store.activity(kind="memory_decision", user=str(member), user_id=member.id, decision=decision, text=p["text"])
+    if decision == "simpan":
+        note = memory.add(new_text or p["text"], p["by"], p["source"])
+        await send(ctl, f"Sip, aku inget: [{note['id']}] {note['text']}", reference=reference)
+    else:
+        await send(ctl, "Oke, nggak aku simpan.", reference=reference)
 
 
 # ---------- tugas berkala ----------

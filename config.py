@@ -59,8 +59,16 @@ HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar 
 
 # --- AI ---
 # Dicoba berurutan: kalau model pertama lambat/overload, otomatis pindah ke berikutnya.
-GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]
-GEMINI_TIMEOUT = 15                    # detik per percobaan
+# Model pintar: jawab member yang nge-tag/bales Minhub, pertanyaan yang ada gambarnya, dan perintah admin.
+GEMINI_MODELS_SMART = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+# Model ringan: nentuin perlu nimbrung atau nggak, nulis pengingat/pengumuman, ngeringkas jawaban admin jadi catatan.
+GEMINI_MODELS_FAST = ["gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]
+GEMINI_THINKING = "low"                # model pintar "mikir dulu" sebelum jawab: "low" / "high", kosongkan buat matiin
+GEMINI_TIMEOUT = 15                    # detik per percobaan (model ringan)
+GEMINI_TIMEOUT_SMART = 30              # detik per percobaan (model pintar, butuh waktu buat mikir)
+MAX_IMAGES = 3                         # maks gambar per pesan yang ikut dibaca AI
+MAX_IMAGE_MB = 5                       # gambar lebih gede dari ini nggak dibaca
+MEMORY_MAX_NOTES = 100                 # maks catatan yang Minhub inget (yang paling lama dibuang duluan)
 GEMINI_RETRIES = 1                     # kena 503/429/timeout: coba ulang sekian kali sebelum pindah model
 GEMINI_RETRY_DELAY = 2                 # detik jeda sebelum coba ulang
 

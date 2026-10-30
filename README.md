@@ -12,6 +12,15 @@ Fitur:
   dan membaca ~10 pesan terakhir (pesan error lama Minhub nggak ikut dibaca).
 - **Nimbrung pintar**: di `#diskusi-general` & channel campaign, bot menjawab pertanyaan walau tidak di-tag, tapi diam
   kalau cuma basa-basi/obrolan antar member. Kalau di-tag (atau dibalas), bot selalu jawab.
+- **Dua level otak**: jawaban buat member yang nge-tag/bales Minhub dan perintah admin pakai model pintar
+  (`gemini-3.5-flash` + mode mikir), keputusan nimbrung & teks otomatis pakai model ringan. Atur di `config.py`
+  (`GEMINI_MODELS_SMART`, `GEMINI_MODELS_FAST`, `GEMINI_THINKING`).
+- **Baca gambar**: screenshot/gambar dari member (kalau nanya) dan dari admin di `#minhub-control` ikut dibaca AI
+  (maks `MAX_IMAGES` gambar, `MAX_IMAGE_MB` MB).
+- **Ingatan jangka panjang** (`memory.json`): admin bisa bilang *"ingat: payout siti tiap Jumat"*, *"kamu inget apa
+  aja?"*, atau *"lupain catatan nomor 3"* di `#minhub-control`. Kalau admin membalas pertanyaan member di
+  `#diskusi-general`/channel campaign, Minhub ngusulin ringkasannya jadi catatan; baru disimpan setelah di-acc ✅
+  (atau dibalas revisinya). Catatan dipakai tiap jawab dan diprioritaskan di atas FAQ.
 - **Jeda humanis** 5–60 detik dengan status "typing..." sebelum membalas.
 - **Pengumuman campaign baru** di `#pengumuman` (dicek tiap 3 menit): tag @everyone, teks variatif (nama, brand, rate,
   deadline, channel diskusi) + kartu campaign.
@@ -79,6 +88,7 @@ Bot online selama jendela itu terbuka.
 | `faq.md` | FAQ yang dipakai bot untuk menjawab — makin lengkap makin pintar |
 | `assets/background.webp` | Background kartu welcome |
 | `seen_campaigns.json`, `campaign_state.json`, `bot_state.json` | State otomatis (jangan diedit manual) |
+| `memory.json`, `memory_pending.json` | Catatan yang Minhub inget & usulan catatan yang nunggu acc |
 | `events.jsonl`, `activity.jsonl` | Log event (buat rekap) & log aktivitas |
 
 ## Alat bantu
