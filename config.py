@@ -89,6 +89,9 @@ REPORTS = {
     "semanis-drama-tropicana-slim": "istrikontrakxceodinginn-ccajrjyq3o",
     "todecella": "cpetodecellajakarta-n4yissjuhx",
     "shopee-11-11": "shopee-11-11-x-no-na-t92qyclpd4",
+    "film-piye-to-kih": "film-piye-to-kih-1cfw6gredv",
+    "fadil-jaidi-x-vitameal-podcast-raditya-dika": "fadil-jaidi-x-vitameal-pz22vib4ee",
+    "film-the-doll-ghawiah": "the-doll-ghawiah-kntqc4n013",
 }
 # Laporan baru bisa ditambah lewat chat di #minhub-control ("laporan <campaign>: <link>"), disimpan di reports.json.
 
@@ -109,6 +112,9 @@ CAMPAIGN_ALIASES = {
     "jujutsu-kaisen-run-indonesia": ["jjk", "jujutsu", "fun run"],
     "internet-rakyat-sahabat-ira": ["ira", "sahabat ira", "internet rakyat"],
     "ajaib-cuantalks": ["ajaib", "cuantalks"],
+    "film-piye-to-kih": ["piye", "piye to kih"],
+    "fadil-jaidi-x-vitameal-podcast-raditya-dika": ["fadil", "fadil jaidi", "vitameal", "raditya dika"],
+    "film-the-doll-ghawiah": ["the doll", "doll", "ghawiah"],
 }
 VIRAL_POST_HOUR = 19                  # jam (WIB) mulai share tiap hari
 VIRAL_MIN_VIEWS = 100_000              # minimal views normal
