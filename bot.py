@@ -14,21 +14,30 @@ import urllib.request
 from collections import defaultdict, deque
 
 RETRY_EXIT_CODE = 75  # bot berhenti karena gangguan sementara (misal IP diblokir Discord) -> nyalakan lagi
+LOGIN_FAILED_EXIT_CODE = 78  # token/intent salah -> jangan dicoba ulang terus
 
 
 def supervise():
     """Penjaga: jalankan bot sebagai proses anak. Kalau berhenti karena gangguan sementara (misal IP server
-    diblokir Discord), tunggu lalu coba lagi sendiri, jadi nggak perlu klik Start manual."""
+    diblokir Discord) atau mati mendadak (crash, kehabisan RAM), tunggu lalu nyalakan lagi sendiri, jadi nggak
+    perlu klik Start manual. Cuma berhenti kalau dimatikan normal atau token/intent salah."""
     import subprocess
+    import store
     delay = 60
     while True:
         started = time.monotonic()
         code = subprocess.call([sys.executable, os.path.abspath(__file__), "--child"])
-        if code != RETRY_EXIT_CODE:
+        if code in (0, LOGIN_FAILED_EXIT_CODE):
             sys.exit(code)
         if time.monotonic() - started > 600:  # sempat jalan normal lama -> mulai lagi dari jeda pendek
             delay = 60
-        print(f"[penjaga] Minhub gagal nyambung ke Discord, coba lagi {delay // 60} menit lagi", flush=True)
+        if code == RETRY_EXIT_CODE:
+            print(f"[penjaga] Minhub gagal nyambung ke Discord, coba lagi {delay // 60} menit lagi", flush=True)
+        else:
+            state = store.load("bot_state.json", {})
+            state["last_exit"] = code  # dilaporin ke admin pas nyala lagi
+            store.save("bot_state.json", state)
+            print(f"[penjaga] Minhub mati mendadak (kode {code}), nyala lagi {delay // 60} menit lagi", flush=True)
         time.sleep(delay)
         delay = min(delay * 2, 900)
 
@@ -510,8 +519,13 @@ async def announce_startup(previous: dict):
     else:
         why = (f"Sebelumnya mati mendadak/crash, terakhir kelihatan hidup {beat[:16].replace('T', ' ')} WIB. "
                f"Cek log Wispbyte kalau perlu.")
+    code = previous.get("last_exit")
+    if code is not None:
+        reason = {-9: "kemungkinan kehabisan RAM", -15: "dimatikan dari luar"}.get(code, "crash")
+        why += f" Penjaga nyalain lagi otomatis (kode keluar {code}, {reason})."
     state = store.load("bot_state.json", {})
     state["clean_stop"] = None
+    state["last_exit"] = None
     store.save("bot_state.json", state)
     store.activity(kind="startup", host=host_label(), version=git_version())
     await alert(f"Minhub nyala lagi di **{host_label()}** (versi `{git_version()}`). {why}\n"
@@ -1878,7 +1892,8 @@ if __name__ == "__main__":
     try:
         client.run(os.environ["DISCORD_TOKEN"], log_handler=None)
     except (discord.LoginFailure, discord.PrivilegedIntentsRequired):
-        raise  # token/intent salah: jangan dicoba ulang terus
+        log.exception("Token/intent Discord salah, Minhub berhenti")
+        sys.exit(LOGIN_FAILED_EXIT_CODE)  # jangan dicoba ulang terus
     except Exception:
         log.exception("Minhub berhenti karena gangguan koneksi ke Discord")
         sys.exit(RETRY_EXIT_CODE)
