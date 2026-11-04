@@ -124,7 +124,8 @@ LEAK = re.compile(r"AIza[0-9A-Za-z_\-]{20,}|[A-Za-z0-9_\-]{24,}\.[A-Za-z0-9_\-]{
 last_auto_reply: dict[int, float] = {}
 sync_lock = asyncio.Lock()
 error_msgs: set[int] = set()
-drafts: dict[int, dict] = {}
+# Draf perintah admin yang belum dikirim (id admin -> draf). Disimpan di file biar tahan restart dan bisa di-acc kapan aja.
+drafts: dict[int, dict] = {int(k): v for k, v in store.load("drafts.json", {}).items()}
 _hits: dict[int, deque] = defaultdict(deque)
 _blocked: dict[int, deque] = defaultdict(deque)
 _warned: dict[int, float] = {}
@@ -868,7 +869,7 @@ async def recover_control(guild: discord.Guild, since: datetime.datetime):
     for m in messages:
         if not m.author.bot and m.id not in answered and is_admin(m.author):
             log.info("Proses perintah admin yang ketinggalan: %s", m.content[:80])
-            asyncio.create_task(handle_control(m))  # jalan terpisah: nunggu ✅ preview nggak nahan langkah lain
+            asyncio.create_task(handle_control(m))  # jalan terpisah biar nggak nahan langkah lain
 
 
 async def recover_unanswered(guild: discord.Guild, since: datetime.datetime):
@@ -897,6 +898,59 @@ async def recover_unanswered(guild: discord.Guild, since: datetime.datetime):
 
 # ---------- perintah admin di #minhub-control ----------
 
+def save_drafts():
+    store.save("drafts.json", {str(k): v for k, v in drafts.items()})
+
+
+def find_draft(author_id: int, message_id: int | None = None) -> tuple[int, dict | None]:
+    """Draf yang dimaksud admin: kalau dia nge-reply preview, draf itu (punya admin siapa pun), kalau nggak drafnya sendiri."""
+    expired = [k for k, d in drafts.items() if time.time() - d["t"] > config.DRAFT_KEEP_HOURS * 3600]
+    for k in expired:
+        drafts.pop(k)
+    if expired:
+        save_drafts()
+    if message_id:
+        for owner, d in drafts.items():
+            if message_id in d.get("preview_ids", ()):
+                return owner, d
+    return author_id, drafts.get(author_id)
+
+
+async def draft_files(draft: dict) -> list:
+    if not draft.get("source"):
+        return []
+    channel = client.get_channel(draft["source"][0])
+    source = await channel.fetch_message(draft["source"][1])  # ambil ulang: link lampiran Discord bisa kedaluwarsa
+    return [await a.to_file() for a in all_attachments(source)]
+
+
+async def send_draft(owner: int, draft: dict, member, reference=None):
+    """Kirim draf yang udah di-acc admin, lewat react atau chat."""
+    ctl = control_channel(home_guild())
+    target = home_guild().get_channel_or_thread(draft["channel_id"]) if draft.get("channel_id") else None
+    if not target:
+        await send(ctl, "Channel tujuannya nggak ketemu kak, sebut channel-nya ya.", reference=reference)
+        return
+    drafts.pop(owner, None)  # dibuang duluan biar ✅ dobel nggak ngirim dua kali
+    save_drafts()
+    try:
+        text, embeds = await linkpreview.prepare(draft["final"])
+        embeds = [await linkpreview.clean_embed(e) for e in embeds]
+        sent = await target.send(text or None, embeds=embeds, files=await draft_files(draft),
+                                 allowed_mentions=discord.AllowedMentions(everyone=draft.get("everyone", False),
+                                                                          users=False, roles=False))
+    except Exception as e:
+        drafts[owner] = draft
+        save_drafts()
+        log.exception("Gagal kirim draf admin")
+        await send(ctl, f"Gagal kirim: `{type(e).__name__}: {str(e)[:300]}`. Drafnya masih aku simpan.", reference=reference,
+                   raw=True)
+        return
+    await send(ctl, f"Terkirim: {sent.jump_url}", reference=reference)
+    store.activity(kind="admin_send", user=str(member), user_id=member.id, channel=target.name, text=draft["final"][:300])
+    log.info("Admin %s kirim info ke #%s", member, target.name)
+
+
 async def control_reply(message: discord.Message, text: str, error: bool = False):
     sent = await send(message.channel, text, reference=message, raw=error)
     if error:
@@ -910,10 +964,7 @@ async def handle_control(message: discord.Message):
     author = message.author
     targets = [c for c in message.channel_mentions
                if c.id != message.channel.id and isinstance(c, (discord.TextChannel, discord.Thread))]
-    draft = drafts.get(author.id)
-    if draft and time.monotonic() - draft["t"] > 1800:
-        draft = None
-        drafts.pop(author.id, None)
+    owner, draft = find_draft(author.id, message.reference.message_id if message.reference else None)
     store.activity(kind="admin_command", user=str(author), user_id=author.id, text=message.content[:300],
                    targets=[c.name for c in targets])
 
@@ -921,7 +972,7 @@ async def handle_control(message: discord.Message):
     ref = message.reference.resolved if message.reference else None
     replied, reply_viral, reply_announce, reply_note = "", None, None, None
     if isinstance(ref, discord.Message) and ref.author == client.user:
-        replied = ref.clean_content[:600] + (f" [kartu: {ref.embeds[0].title}]" if ref.embeds else "")
+        replied = ref.clean_content[:1500] + (f" [kartu: {ref.embeds[0].title}]" if ref.embeds else "")
         reply_viral = viral_ask_for(ref.id)
         reply_announce = announce_ask_for(ref.id)
         reply_note = str(ref.id) if str(ref.id) in memory.pending() else None
@@ -932,7 +983,7 @@ async def handle_control(message: discord.Message):
         elif reply_announce:
             replied += f" (ini usulan pengumuman id {reply_announce})"
         elif draft and ref.id in draft.get("preview_ids", ()):
-            replied += " (ini preview draf terakhir; balasan admin = revisi atau keputusan untuk draf itu)"
+            replied += " (ini bagian dari preview draf; balasan admin = persetujuan, pembatalan, atau revisi draf itu)"
 
     try:
         await asyncio.wait_for(watcher.fetch(), timeout=15)  # biar daftar campaign selalu yang terbaru
@@ -944,8 +995,9 @@ async def handle_control(message: discord.Message):
         async with message.channel.typing():
             cmd = await brain.command(
                 message_text(message), len(all_attachments(message)),
-                ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
-                (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
+                ", ".join(f"#{c.name}" for c in targets), await recent_history(message, config.CONTROL_HISTORY_MESSAGES),
+                (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")
+                 + (" (pakai tag everyone)" if draft.get("everyone") else "")) if draft else "",
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
                 pending_announcements_text(), channel_content, memory.text(query=message_text(message), with_ids=True),
                 memory.pending_text(),
@@ -1061,53 +1113,64 @@ async def handle_control(message: discord.Message):
                 await control_reply(message, f"Gagal umumin: `{type(e).__name__} {e.status}: {e.text[:300]}`",
                                     error=True)
         return
+    if cmd["aksi"] == "batal_draf":
+        if draft:
+            drafts.pop(owner, None)
+            save_drafts()
+        await control_reply(message, "Oke, batal 👍" if draft else "Lagi nggak ada draf yang perlu dibatalin kak.")
+        return
     if cmd["aksi"] not in ("kirim", "preview"):
         await control_reply(message, cmd["balasan"] or "Siap.")
+        return
+    if (cmd["aksi"] == "kirim" and not cmd["pesan"] and draft and draft.get("confirm_id") and not targets
+            and not all_attachments(message)):  # admin acc lewat chat: udah lihat preview-nya, langsung kirim
+        await send_draft(owner, draft, author, reference=message)
         return
 
     text = cmd["pesan"] or (draft["text"] if draft else "")
     if (draft and cmd["pesan"] and cmd["pesan"] != draft["text"] and isinstance(ref, discord.Message)
             and ref.id in draft.get("preview_ids", ())):  # admin merevisi draf: siapa tahu ada pelajaran buat lain kali
         asyncio.create_task(learn_from_correction(message, draft["text"]))
-    source = message if message.attachments else (draft.get("source") if draft else None)
+    source = [message.channel.id, message.id] if all_attachments(message) else (draft.get("source") if draft else None)
     if not text and not source:
-        await control_reply(message, "Pesan apa yang mau dikirim? Tulis aja isinya ya.")
+        await control_reply(message, f"Aku lagi nggak pegang draf apa pun kak (draf aku simpan {config.DRAFT_KEEP_HOURS} "
+                                     f"jam). Tulis lagi aja isinya ya.")
         return
     target = targets[0] if targets else (message.guild.get_channel(draft["channel_id"])
                                          if draft and draft.get("channel_id") else None)
     everyone = cmd.get("everyone", False)
-    drafts[author.id] = {"text": text, "source": source, "channel_id": target.id if target else None,
-                         "channel": target.name if target else None, "t": time.monotonic(),
-                         "version": (draft or {}).get("version", 0) + 1, "preview_ids": [], "everyone": everyone}
+    drafts.pop(owner, None)
+    new_draft = {"text": text, "source": source, "channel_id": target.id if target else None,
+                 "channel": target.name if target else None, "t": time.time(),
+                 "preview_ids": list((draft or {}).get("preview_ids", ())), "everyone": everyone}
+    drafts[author.id] = new_draft
+    save_drafts()
 
     if cmd["aksi"] == "kirim" and not target:
         await control_reply(message, "Mau dikirim ke channel mana? Sebut channel-nya ya, misal #pengumuman.")
         return
     try:
-        await preview_and_send(message, text, source, target, everyone)
+        await show_draft_preview(message, new_draft, target)
     except discord.HTTPException as e:
         log.exception("Gagal kirim/preview perintah admin")
         await control_reply(message, f"Gagal kirim: `{type(e).__name__} {e.status}: {e.text[:300]}`", error=True)
 
 
-async def preview_and_send(message: discord.Message, text: str, source, target, everyone: bool = False):
+async def show_draft_preview(message: discord.Message, draft: dict, target):
+    """Tunjukin preview persis, lalu selesai: draf tetap kesimpan dan bisa di-acc kapan aja lewat react atau chat."""
     guild = message.guild
     _, mentions = build_refs(guild)
-    text = fill_mentions(tidy(text, words=False), mentions)[:1900]  # kalimat dari admin: kata-katanya dihormati
-    if everyone:
+    text = fill_mentions(tidy(draft["text"], words=False), mentions)[:1900]  # kalimat dari admin: kata-katanya dihormati
+    if draft["everyone"]:
         text = "@everyone " + text  # di preview nggak nge-ping (allowed_mentions none), baru nge-ping pas dikirim
-    text, embeds = await linkpreview.prepare(text)
+    draft["final"] = text
+    shown_text, embeds = await linkpreview.prepare(text)
     embeds = [await linkpreview.clean_embed(e) for e in embeds]
-
-    async def files():
-        return [await a.to_file() for a in source.attachments] if source else []
-
-    draft = drafts.get(message.author.id) or {}
-    version = draft.get("version")
     header = await control_reply(message, f"Preview pesan{' ke ' + target.mention if target else ''} (persis kayak gini):")
-    shown = await message.channel.send(text or None, embeds=embeds, files=await files(),
+    shown = await message.channel.send(shown_text or None, embeds=embeds, files=await draft_files(draft),
                                        allowed_mentions=discord.AllowedMentions.none())
-    draft.setdefault("preview_ids", []).extend([header.id, shown.id])
+    draft["preview_ids"].extend([header.id, shown.id])
+    save_drafts()
     if not target:
         await send(message.channel, "Kalau udah oke, sebut channel tujuannya ya, misal *kirim ke #pengumuman*.")
         return
@@ -1117,36 +1180,34 @@ async def preview_and_send(message: discord.Message, text: str, source, target, 
                                      f"Tambahin izin View Channel + Send Messages buat role Minhub di sana.", error=True)
         return
 
-    confirm = await message.channel.send("React ✅ buat kirim, ❌ buat batal (5 menit). Mau revisi? Bales pesan ini "
-                                         "atau preview di atas pakai koreksinya.")
-    draft.setdefault("preview_ids", []).append(confirm.id)
+    confirm = await message.channel.send(f"React ✅ buat kirim, ❌ buat batal, atau bales *acc*. Drafnya aku simpan "
+                                         f"{config.DRAFT_KEEP_HOURS} jam, jadi santai aja. Mau revisi? Bales pesan ini atau "
+                                         f"preview di atas pakai koreksinya.")
+    draft["preview_ids"].append(confirm.id)
+    draft["confirm_id"] = confirm.id
+    save_drafts()
     await confirm.add_reaction("✅")
     await confirm.add_reaction("❌")
 
-    def check(reaction, user):
-        return user.id == message.author.id and reaction.message.id == confirm.id and str(reaction.emoji) in ("✅", "❌")
 
-    try:
-        reaction, _ = await client.wait_for("reaction_add", check=check, timeout=300)
-    except asyncio.TimeoutError:
-        await send(confirm.channel, "Kelamaan, aku batalin ya. Draf masih aku inget 30 menit.", reference=confirm)
-        return
-    if str(reaction.emoji) == "❌":
-        await send(confirm.channel, "Oke, batal 👍", reference=confirm)
-        return
-    current = drafts.get(message.author.id)
-    if current and current.get("version") != version:
-        await send(confirm.channel, "Ini preview lama, udah ada revisinya. Pakai preview yang terbaru ya.",
-                   reference=confirm)
-        return
-
-    sent = await target.send(text or None, embeds=embeds, files=await files(),
-                             allowed_mentions=discord.AllowedMentions(everyone=everyone, users=False, roles=False))
-    drafts.pop(message.author.id, None)
-    await send(confirm.channel, f"Terkirim: {sent.jump_url}", reference=confirm)
-    store.activity(kind="admin_send", user=str(message.author), user_id=message.author.id, channel=target.name,
-                   text=text[:300])
-    log.info("Admin %s kirim info ke #%s", message.author, target.name)
+async def react_draft(message_id: int, emoji: str, member) -> bool:
+    """Admin react di pesan konfirmasi draf. Balikin True kalau pesan itu memang bagian dari draf."""
+    owner, draft = find_draft(member.id, message_id)
+    if not draft or message_id not in draft.get("preview_ids", ()):
+        return False
+    if emoji not in ("✅", "❌") or not is_admin(member):
+        return True
+    ctl = control_channel(home_guild())
+    channel_msg = ctl.get_partial_message(message_id)
+    if message_id != draft.get("confirm_id"):
+        await send(ctl, "Ini preview lama, udah ada revisinya. Pakai preview yang terbaru ya.", reference=channel_msg)
+    elif emoji == "❌":
+        drafts.pop(owner, None)
+        save_drafts()
+        await send(ctl, "Oke, batal 👍", reference=channel_msg)
+    else:
+        await send_draft(owner, draft, member, reference=channel_msg)
+    return True
 
 
 @client.event
@@ -1156,6 +1217,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
     guild = client.get_guild(payload.guild_id)
     member = payload.member or (guild.get_member(payload.user_id) if guild else None)
+    if member and await react_draft(payload.message_id, str(payload.emoji), member):
+        return
     if str(payload.message_id) in pending_announcements():
         decision = ANNOUNCE_REACTIONS.get(str(payload.emoji))
         if decision and is_admin(member):

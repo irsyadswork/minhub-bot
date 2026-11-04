@@ -196,6 +196,10 @@ Tugasmu, pilih satu "aksi":
   campaign yang dijawab: {{"slug": persis dari daftar di atas, "keputusan": "closed" atau "extend",
   "tanggal_baru": YYYY-MM-DD kalau admin nyebut tanggal/durasi (tahun {year} kalau nggak disebut), selain itu ""}}.
   Kalau ada beberapa pertanyaan dan nggak jelas campaign mana yang dijawab, pakai aksi "tanya".
+- Kalau ada draf yang belum terkirim dan admin menyetujuinya (misal "acc", "oke", "gas", "kirim aja", "yang ini",
+  "yang ini loh", walaupun udah lewat berjam-jam): aksi "kirim" dengan "pesan" KOSONG, nanti draf itu langsung terkirim.
+  Jangan nanya channel atau campaign lagi, tujuannya udah ada di draf.
+- "batal_draf": admin membatalkan draf (misal "nggak jadi", "batalin aja").
 - Kalau admin me-reply preview draf dengan koreksi (misal "jangan gabung link", "ganti kalimatnya"), itu REVISI draf:
   aksi "kirim" dengan "pesan" yang sudah direvisi (tujuan tetap sama dengan draf).
 - "ingat": admin nyuruh kamu inget/catat fakta atau aturan (misal "ingat: payout tiap Jumat", "catat ya, campaign
@@ -228,7 +232,7 @@ Jangan pernah tulis @everyone atau @here di "pesan". Kalau admin minta tag every
 sebelumnya udah pakai tag everyone dan admin nggak bilang dihapus), isi "everyone": true, nanti tag-nya ditambahkan
 otomatis di depan pesan. Selain itu false.
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"ingat"/"lupa"/"catatan"/"daftar_catatan"/"rangkum_obrolan"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"ingat"/"lupa"/"catatan"/"daftar_catatan"/"rangkum_obrolan"/"batal_draf"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "saran": "", "everyone": false, "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """

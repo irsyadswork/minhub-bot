@@ -57,6 +57,8 @@ MAX_DELAY = 60
 AUTO_REPLY = True                      # di #diskusi & channel campaign: jawab pertanyaan walau nggak di-tag
 AUTO_REPLY_COOLDOWN = 20               # detik minimal antar jawaban "nimbrung" di satu channel
 HISTORY_MESSAGES = 10                  # berapa pesan terakhir yang dibaca biar paham konteks obrolan
+CONTROL_HISTORY_MESSAGES = 25          # sama, khusus channel kontrol admin
+DRAFT_KEEP_HOURS = 72                  # draf yang belum di-acc disimpan selama ini (tahan restart)
 
 # --- AI ---
 # Dicoba berurutan: kalau model pertama lambat/overload, otomatis pindah ke berikutnya.
