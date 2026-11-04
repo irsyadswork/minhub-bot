@@ -243,9 +243,10 @@ async def recent_history(message: discord.Message, limit: int = config.HISTORY_M
             if is_error_message(m):
                 continue
             name = config.BOT_NAME if m.author == client.user else m.author.display_name
-            text = m.clean_content[:300] or ("" if m.attachments else "[embed]" if m.embeds else "")
-            if m.attachments:
-                kind = "gambar" if any((a.content_type or "").startswith("image/") for a in m.attachments) else "file"
+            attachments = all_attachments(m)
+            text = message_text(m)[:600] or ("" if attachments else "[embed]" if m.embeds else "")
+            if attachments:
+                kind = "gambar" if any((a.content_type or "").startswith("image/") for a in attachments) else "file"
                 text = f"{text} [kirim {kind}]".strip()
             lines.append(f"{name}: {text}")
     except discord.HTTPException:
@@ -253,10 +254,26 @@ async def recent_history(message: discord.Message, limit: int = config.HISTORY_M
     return "\n".join(reversed(lines))
 
 
+def message_text(m: discord.Message) -> str:
+    """Isi pesan, termasuk isi pesan yang di-forward (teks pesan forward nggak ada di content biasa)."""
+    parts = [m.clean_content]
+    for snap in getattr(m, "message_snapshots", None) or []:
+        if snap.content:
+            parts.append(f"[pesan yang di-forward: {snap.content[:800]}]")
+    return "\n".join(p for p in parts if p)
+
+
+def all_attachments(m: discord.Message) -> list:
+    found = list(m.attachments)
+    for snap in getattr(m, "message_snapshots", None) or []:
+        found.extend(snap.attachments)
+    return found
+
+
 async def read_images(message: discord.Message) -> list[tuple[bytes, str]]:
     """Gambar yang dilampirkan di pesan (buat dibaca AI). Yang kegedean/bukan gambar dilewati."""
     images = []
-    for a in message.attachments:
+    for a in all_attachments(message):
         mime = (a.content_type or "").split(";")[0]
         if not mime.startswith("image/") or a.size > config.MAX_IMAGE_MB * 1024 * 1024:
             continue
@@ -304,7 +321,8 @@ async def compose(task: str, facts: dict, templates: list[str], required: list[s
     """Tulis pesan pakai AI biar variatif; kalau gagal/kurang lengkap, pakai template."""
     fact_text = "\n".join(f"- {k}: {v}" for k, v in facts.items())
     try:
-        text = await brain.write(f"{task}\nVariasi gaya kali ini: {random.choice(STYLES)}.", fact_text)
+        text = await brain.write(f"{task}\nVariasi gaya kali ini: {random.choice(STYLES)}.", fact_text,
+                                 notes=memory.text(query=task, limit=15))
         if text and len(text) < 900 and all(r.lower() in text.lower() for r in required):
             return text
         log.info("Teks AI kurang lengkap, pakai template")
@@ -411,14 +429,14 @@ async def sync_guild(guild: discord.Guild):
 
             existing = campaign_channels(guild)
             category = None
+            blocked = store.load("bot_state.json", {}).get("create_blocked_until")
+            if blocked and store.now_wib().isoformat() < blocked:
+                log.info("Bikin channel ditahan dulu sampai %s (rate limit Discord)", blocked)
             for c in watcher.active():
-                if c["slug"] in existing:
+                if c["slug"] in existing or (blocked and store.now_wib().isoformat() < blocked):
                     continue
                 if category is None:
-                    category = (guild.get_channel(config.CAMPAIGN_CATEGORY_ID) if config.CAMPAIGN_CATEGORY_ID else None) \
-                        or discord.utils.find(lambda k: k.name.lower() == config.CAMPAIGN_CATEGORY.lower(),
-                                              guild.categories) \
-                        or await guild.create_category(config.CAMPAIGN_CATEGORY, reason="Minhub")
+                    category = active_category(guild) or await guild.create_category(config.CAMPAIGN_CATEGORY, reason="Minhub")
                 ch = await guild.create_text_channel(
                     watcher.channel_name(c), category=category, topic=watcher.channel_topic(c),
                     overwrites=public_overwrites(guild), reason=f"Minhub: diskusi campaign {c['slug']}")
@@ -428,6 +446,19 @@ async def sync_guild(guild: discord.Guild):
                 store.save("campaign_state.json", state)
                 log.info("Bikin channel #%s", ch.name)
                 await ensure_intro(ch, c, tag_everyone=True)  # campaign baru: kabari semua member
+        except discord.RateLimited as e:
+            # Ditahan Discord berjam-jam: jangan dicoba tiap 3 menit, ngirim request yang pasti ditolak malah bahaya
+            until = store.now_wib() + datetime.timedelta(seconds=e.retry_after + 60)
+            state = store.load("bot_state.json", {})
+            state["create_blocked_until"] = until.isoformat(timespec="seconds")
+            store.save("bot_state.json", state)
+            log.warning("Bikin channel kena rate limit Discord sampai %s", until)
+            missing = [c for c in watcher.active() if c["slug"] not in campaign_channels(guild)]
+            lines = "\n".join(f"- nama `{watcher.channel_name(c)}`, topic `{watcher.channel_topic(c)}`" for c in missing)
+            await alert(f"Discord nahan aku bikin channel baru sampai {until.strftime('%d %b %H:%M')} WIB. Aku coba lagi "
+                        f"setelah itu. Kalau mau sekarang, bikin manual di kategori Diskusi Campaign, nanti aku kenali dari "
+                        f"topic-nya:\n{lines}", key="create:limit", cooldown=False)
+            return
         except discord.Forbidden:
             log.warning("Minhub belum punya izin Manage Channels / Manage Roles, channel nggak bisa dibuat otomatis")
             await alert("Aku nggak bisa bikin channel otomatis: izin **Manage Channels / Manage Permissions** di "
@@ -438,6 +469,39 @@ async def sync_guild(guild: discord.Guild):
             c = watcher.get(slug)
             if c and ch.id not in intro_done:
                 await ensure_intro(ch, c)
+
+
+def active_category(guild: discord.Guild):
+    return (guild.get_channel(config.CAMPAIGN_CATEGORY_ID) if config.CAMPAIGN_CATEGORY_ID else None) \
+        or discord.utils.find(lambda k: k.name.lower() == config.CAMPAIGN_CATEGORY.lower(), guild.categories)
+
+
+def closed_category(guild: discord.Guild):
+    return discord.utils.find(lambda k: config.CLOSED_CATEGORY.lower() in k.name.lower(), guild.categories)
+
+
+async def place_campaign_channel(guild: discord.Guild, ch, is_closed: bool):
+    """Campaign 🔴 masuk kategori closed, balik ke kategori aktif kalau statusnya hidup lagi (misal di-extend)."""
+    target = closed_category(guild) if is_closed else active_category(guild)
+    if not target:
+        if is_closed:
+            await alert(f"Kategori **{config.CLOSED_CATEGORY}** belum ada, jadi channel campaign yang selesai belum bisa "
+                        f"aku pindahin. Tolong bikin kategorinya, lalu kasih role Minhub izin **Manage Channels** + "
+                        f"**Manage Permissions** di situ.", key="closed:none")
+        return
+    if ch.category_id == target.id:
+        return
+    try:
+        await asyncio.wait_for(ch.edit(category=target, reason="Minhub: pisahin campaign aktif & closed"), timeout=60)
+        log.info("Pindah #%s ke kategori %s", ch.name, target.name)
+        await asyncio.sleep(2)
+    except (asyncio.TimeoutError, discord.RateLimited):
+        log.warning("Pindah #%s ketahan rate limit Discord, dicoba lagi putaran berikutnya", ch.name)
+    except discord.Forbidden:
+        await alert(f"Aku nggak bisa mindahin channel ke kategori **{target.name}**: role Minhub butuh izin "
+                    f"**Manage Channels** + **Manage Permissions** di kategori itu.", key="closed:perm")
+    except discord.HTTPException as e:
+        log.warning("Gagal pindah #%s: %s", ch.name, e)
 
 
 intro_done: set[int] = set()
@@ -590,9 +654,12 @@ async def on_message(message: discord.Message):
     general = is_channel(base, config.GENERAL_CHANNEL_ID, config.GENERAL_CHANNEL)
     legacy = any(w.lower() in base.name.lower() for w in config.REPLY_CHANNELS)
 
-    if (is_admin(message.author) and (slug or general) and isinstance(ref, discord.Message)
-            and not ref.author.bot and not is_admin(ref.author)):
-        asyncio.create_task(propose_note(message, ref, base))
+    if is_admin(message.author) and (slug or general) and not mentioned:
+        if isinstance(ref, discord.Message):
+            if not ref.author.bot and not is_admin(ref.author):
+                asyncio.create_task(propose_note(message, ref, base, slug))
+        else:
+            asyncio.create_task(propose_note_from_chat(message, base, slug))
 
     if mentioned:
         if not (slug or general or legacy):
@@ -651,7 +718,9 @@ QUEUE_MAX_HOURS = 3                      # lewat dari ini nyerah: minta admin ba
 async def ask_ai(message: discord.Message, base, slug, mentioned: bool) -> tuple[dict, dict]:
     """Minta jawaban ke Gemini. Balikin (hasil, mentions)."""
     images = await read_images(message)
-    question = re.sub(rf"<@!?{client.user.id}>", "", message.content).strip() or (
+    forwarded = "\n".join(f"[pesan yang di-forward: {s.content[:800]}]"
+                          for s in getattr(message, "message_snapshots", None) or [] if s.content)
+    question = (re.sub(rf"<@!?{client.user.id}>", "", message.content).strip() + "\n" + forwarded).strip() or (
         "(kirim gambar tanpa teks)" if images else "(cuma nge-tag kamu tanpa pertanyaan)")
     campaign = watcher.get(slug) if slug else None
     refs, mentions = build_refs(message.guild, campaign)
@@ -663,7 +732,7 @@ async def ask_ai(message: discord.Message, base, slug, mentioned: bool) -> tuple
         reports = ""
     result = await brain.reply(question, message.author.display_name, refs, watcher.summary(),
                                watcher.detail(campaign) if campaign else "", history, mentioned, reports,
-                               memory.text(), images)
+                               memory.text(query=question, slug=slug or ""), images)
     return result, mentions
 
 
@@ -681,6 +750,10 @@ async def deliver(message: discord.Message, base, result: dict, mentions: dict, 
                       reference=message, users=True, roles=True)
     if result["kategori"] == "error":
         error_msgs.add(sent.id)
+    if result.get("tanya_admin"):
+        await alert(f"Aku ragu pas jawab {message.author.mention} di {base.mention} ({sent.jump_url}):\n"
+                    f"{result['tanya_admin'][:800]}\nBoleh dipastiin kak? Kalau udah jelas, bilang aja *ingat: ...* "
+                    f"biar lain kali aku tahu.", key=f"tanya:{sent.id}")
 
 
 def friendly(text: str, author, tag: bool = False) -> str:
@@ -870,11 +943,12 @@ async def handle_control(message: discord.Message):
     try:
         async with message.channel.typing():
             cmd = await brain.command(
-                message.clean_content, len(message.attachments),
+                message_text(message), len(all_attachments(message)),
                 ", ".join(f"#{c.name}" for c in targets), await recent_history(message, 8),
                 (draft["text"] + (f" (tujuan: #{draft['channel']})" if draft.get("channel") else "")) if draft else "",
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
-                pending_announcements_text(), channel_content, memory.text(with_ids=True), memory.pending_text(),
+                pending_announcements_text(), channel_content, memory.text(query=message_text(message), with_ids=True),
+                memory.pending_text(),
                 await read_images(message))
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
@@ -887,6 +961,8 @@ async def handle_control(message: discord.Message):
         return
 
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
+    if cmd["saran"] and cmd["aksi"] not in ("balas", "tanya"):
+        await control_reply(message, f"Saran dari aku kak: {cmd['saran']}")
     if cmd["aksi"] == "laporan":
         await add_reports(message, cmd["keputusan"])
         return
@@ -902,6 +978,9 @@ async def handle_control(message: discord.Message):
             await control_reply(message, cmd["balasan"] or "Yang itu mau dikirim atau nggak kak?")
         for d in decided:
             ask_id = d["id"] if d["id"] in pending_announcements() else reply_announce
+            before = (pending_announcements().get(str(ask_id)) or {}).get("text", "")
+            if before and d["keputusan"] != "kirim":
+                asyncio.create_task(learn_from_correction(message, before))
             try:
                 await decide_announcement(ask_id, d["keputusan"], author, d["pesan_baru"], reference=message)
             except discord.HTTPException as e:
@@ -915,6 +994,9 @@ async def handle_control(message: discord.Message):
             await control_reply(message, cmd["balasan"] or "Mau diapain usulannya? Acc, ganti, atau skip?")
         for d in decided:
             ask_id = d["id"] if d["id"] in pending_virals() else reply_viral
+            before = (pending_virals().get(str(ask_id)) or {}).get("text", "")
+            if before and d["keputusan"] != "kirim":
+                asyncio.create_task(learn_from_correction(message, before))
             try:
                 await decide_viral(ask_id, d["keputusan"], author, d["pesan_baru"], reference=message)
             except discord.HTTPException as e:
@@ -923,12 +1005,34 @@ async def handle_control(message: discord.Message):
                                     error=True)
         return
     if cmd["aksi"] == "ingat":
-        saved = [memory.add(d["catatan"], str(author)) for d in cmd["keputusan"] if d["catatan"]]
-        if not saved:
+        items = [d for d in cmd["keputusan"] if d["catatan"]]
+        if not items:
             await control_reply(message, cmd["balasan"] or "Yang mau aku inget apa kak? Tulis faktanya ya.")
             return
-        store.activity(kind="memory_add", user=str(author), user_id=author.id, notes=[n["text"] for n in saved])
-        await control_reply(message, "Oke, aku inget:\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in saved))
+        saved = []
+        for d in items:
+            if memory.existing(d["bentrok"]):  # bentrok sama catatan lama: jangan milih sendiri, tanya admin
+                await post_note_proposal(message.channel, "Catatan baru ini bentrok sama yang lama, aku tanya dulu ya.",
+                                         d["catatan"], str(author), message.jump_url, d["slug"], d["bentrok"])
+            else:
+                saved.append(save_note(d["catatan"], str(author), slug=d["slug"]))
+        if saved:
+            store.activity(kind="memory_add", user=str(author), user_id=author.id, notes=[n["text"] for n in saved])
+            await control_reply(message, "Oke, aku inget:\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in saved))
+        return
+    if cmd["aksi"] == "daftar_catatan":
+        items = memory.notes()
+        await send_long(message.channel, f"Aku inget {len(items)} catatan:\n" + "\n".join(
+            f"- [{n['id']}] {n['text']}" for n in items) if items else "Belum ada catatan yang aku inget kak.")
+        return
+    if cmd["aksi"] == "rangkum_obrolan":
+        await control_reply(message, "Oke, aku baca obrolan member 7 hari terakhir dulu ya kak.")
+        try:
+            async with message.channel.typing():
+                await run_digest(message.guild)
+        except Exception as e:
+            log.exception("Gagal bikin rangkuman obrolan")
+            await control_reply(message, f"Gagal bikin rangkuman: `{type(e).__name__}: {str(e)[:300]}`", error=True)
         return
     if cmd["aksi"] == "lupa":
         ids = [int(d["id"]) for d in cmd["keputusan"] if d["id"].isdigit()]
@@ -962,6 +1066,9 @@ async def handle_control(message: discord.Message):
         return
 
     text = cmd["pesan"] or (draft["text"] if draft else "")
+    if (draft and cmd["pesan"] and cmd["pesan"] != draft["text"] and isinstance(ref, discord.Message)
+            and ref.id in draft.get("preview_ids", ())):  # admin merevisi draf: siapa tahu ada pelajaran buat lain kali
+        asyncio.create_task(learn_from_correction(message, draft["text"]))
     source = message if message.attachments else (draft.get("source") if draft else None)
     if not text and not source:
         await control_reply(message, "Pesan apa yang mau dikirim? Tulis aja isinya ya.")
@@ -1092,28 +1199,145 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 NOTE_REACTIONS = {"✅": "simpan", "❌": "skip"}
 
 
-async def propose_note(message: discord.Message, question: discord.Message, base):
-    """Admin bales pertanyaan member: kalau jawabannya info umum, usulin jadi catatan di channel kontrol."""
-    q, a = question.clean_content.strip(), message.clean_content.strip()
-    if len(a) < 15 or not QUESTION_HINT.search(q.lower()):
-        return
-    try:
-        note = await brain.learn(q[:600], a[:800], f"#{base.name}", memory.text())
-    except Exception as e:
-        log.warning("Gagal ngeringkas jawaban admin jadi catatan: %s", e)
-        return
-    ctl = control_channel(message.guild)
-    if not note or not ctl:
-        return
-    ask = await send(ctl, f"{message.author.display_name} barusan jawab member di {base.mention} ({message.jump_url}):\n"
-                          f"> {q[:300]}\n> **{message.author.display_name}:** {a[:400]}\n\n"
-                          f"Mau aku inget buat jawab member lain? Usulan catatannya:\n**{note}**\n"
+_noted_questions: set[int] = set()  # pertanyaan yang jawabannya udah pernah dicek, biar nggak diusulin dobel
+
+
+def save_note(text: str, by: str, source: str = "", slug: str = "") -> dict:
+    note = memory.add(text, by, source, slug)
+    total = len(memory.notes())
+    if total >= config.MEMORY_MAX_NOTES * 9 // 10:
+        asyncio.create_task(alert(f"Catatanku udah {total} dari maks {config.MEMORY_MAX_NOTES}. Kalau penuh, yang paling "
+                                  f"lama kebuang, jadi tolong rapiin atau naikin `MEMORY_MAX_NOTES` ya.", key="memory:full"))
+    return note
+
+
+async def post_note_proposal(ctl, header: str, note: str, by: str, source: str = "", slug: str = "",
+                             conflicts: list[int] | None = None):
+    """Usulan catatan selalu lewat acc admin. Kalau bentrok sama catatan lama, admin yang milih."""
+    clashes = memory.existing(conflicts or [])
+    clash_text = ""
+    if clashes:
+        clash_text = ("\nIni bentrok sama catatan lama:\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in clashes)
+                      + "\nKalau ✅, catatan lama itu aku ganti.")
+    ask = await send(ctl, f"{header}\n\nUsulan catatan:\n**{note}**{clash_text}\n"
                           f"React ✅ simpan, ❌ nggak usah. Atau bales pakai revisinya.", raw=True)
     for emoji in NOTE_REACTIONS:
         await ask.add_reaction(emoji)
     pending = memory.pending()
-    pending[str(ask.id)] = {"text": note, "source": message.jump_url, "by": str(message.author)}
+    pending[str(ask.id)] = {"text": note, "source": source, "by": by, "slug": slug,
+                            "replaces": [n["id"] for n in clashes]}
     memory.save_pending(pending)
+
+
+async def propose_note(message: discord.Message, question: discord.Message, base, slug=None):
+    """Admin jawab pertanyaan member: kalau jawabannya info umum, usulin jadi catatan di channel kontrol."""
+    q, a = question.clean_content.strip(), message.clean_content.strip()
+    if question.id in _noted_questions or len(a) < 15 or not QUESTION_HINT.search(q.lower()):
+        return
+    _noted_questions.add(question.id)
+    try:
+        lesson = await brain.learn(q[:600], a[:800], f"#{base.name}", memory.text(query=f"{q} {a}", slug=slug or "", with_ids=True))
+    except Exception as e:
+        log.warning("Gagal ngeringkas jawaban admin jadi catatan: %s", e)
+        return
+    ctl = control_channel(message.guild)
+    if not lesson or not ctl:
+        return
+    await post_note_proposal(
+        ctl, f"{message.author.display_name} barusan jawab member di {base.mention} ({message.jump_url}):\n"
+             f"> {q[:300]}\n> **{message.author.display_name}:** {a[:400]}\n\nMau aku inget buat jawab member lain?",
+        lesson["catatan"], str(message.author), message.jump_url, (slug or "") if lesson["khusus_campaign"] else "",
+        lesson["bentrok"])
+
+
+async def propose_note_from_chat(message: discord.Message, base, slug=None):
+    """Admin jawab tanpa pakai Reply: anggap jawaban kalau pesan sebelumnya pertanyaan member, belum lama."""
+    if len(message.clean_content.strip()) < 15:
+        return
+    try:
+        async for m in message.channel.history(limit=3, before=message):
+            if m.author.bot:
+                continue
+            fresh = message.created_at - m.created_at < datetime.timedelta(minutes=15)
+            if fresh and not is_admin(m.author):
+                await propose_note(message, m, base, slug)
+            return
+    except discord.HTTPException as e:
+        log.warning("Gagal baca pesan sebelum jawaban admin: %s", e)
+
+
+async def learn_from_correction(message: discord.Message, before: str):
+    """Admin ngoreksi/nolak hasil kerja Minhub: kalau ada pelajaran umum, usulin jadi catatan."""
+    correction = message_text(message).strip()
+    if len(correction) < 15:
+        return  # cuma "skip"/"ganti" tanpa alasan: nggak ada yang bisa dipelajari
+    try:
+        lesson = await brain.learn_correction(before[:1000], correction[:800],
+                                              memory.text(query=correction, with_ids=True))
+    except Exception as e:
+        log.warning("Gagal nyari pelajaran dari koreksi admin: %s", e)
+        return
+    if lesson:
+        await post_note_proposal(message.channel, "Dari koreksi kamu barusan, ini yang bisa aku pelajari buat lain kali:",
+                                 lesson["catatan"], str(message.author), message.jump_url, "", lesson["bentrok"])
+
+
+async def collect_member_chat(guild: discord.Guild) -> tuple[str, int]:
+    """Obrolan di #diskusi-general & channel campaign beberapa hari terakhir, buat rangkuman."""
+    channels = list(campaign_channels(guild).values())
+    general = general_channel(guild)
+    if general:
+        channels.insert(0, general)
+    since = discord.utils.utcnow() - datetime.timedelta(days=config.DIGEST_DAYS)
+    lines = []
+    for ch in channels:
+        try:
+            async for m in ch.history(limit=config.DIGEST_MAX_PER_CHANNEL, after=since, oldest_first=False):
+                if m.author.bot or not m.content:
+                    continue
+                role = " (admin)" if is_admin(m.author) else ""
+                lines.append(f"[{ch.name}] {m.author.display_name}{role}: {m.clean_content[:200]}")
+        except discord.HTTPException as e:
+            log.warning("Gagal baca #%s buat rangkuman: %s", ch.name, e)
+    return "\n".join(lines)[:40000], len(lines)
+
+
+async def send_long(dest, text: str):
+    """Kirim teks panjang, dipecah per baris biar nggak lewat batas Discord."""
+    chunk = ""
+    for line in text.split("\n"):
+        while len(line) > 1900:
+            await send(dest, line[:1900], raw=True)
+            line = line[1900:]
+        if len(chunk) + len(line) + 1 > 1900:
+            await send(dest, chunk, raw=True)
+            chunk = ""
+        chunk += line + "\n"
+    if chunk.strip():
+        await send(dest, chunk, raw=True)
+
+
+async def run_digest(guild: discord.Guild):
+    """Laporan obrolan member buat admin: pola & kebingungan, usulan catatan, pertanyaan, dan catatan yang basi."""
+    ctl = control_channel(guild)
+    if not ctl:
+        return
+    chat, count = await collect_member_chat(guild)
+    if not count:
+        await send(ctl, f"Belum ada obrolan member {config.DIGEST_DAYS} hari terakhir yang bisa aku rangkum kak.")
+        return
+    result = await brain.digest(chat, memory.text(with_ids=True, limit=200), campaign_list())
+    await send_long(ctl, f"**Rangkuman obrolan member {config.DIGEST_DAYS} hari terakhir** ({count} pesan dibaca)\n"
+                         f"{result['laporan'] or 'Nggak ada yang menonjol.'}")
+    if result["pertanyaan"]:
+        await send_long(ctl, "**Yang bikin aku bingung, boleh dijawab kak:**\n" + "\n".join(f"- {q}" for q in result["pertanyaan"]))
+    for d in result["catatan"][:config.DIGEST_MAX_NOTES]:
+        await post_note_proposal(ctl, "Dari obrolan minggu ini:", d["catatan"], config.BOT_NAME, "", d["slug"], d["bentrok"])
+    old = memory.stale({c["slug"] for c in watcher.active()})
+    if old:
+        await send_long(ctl, "**Catatan ini khusus campaign yang udah nggak aktif, masih perlu?** Kalau nggak, bilang "
+                             "*lupain catatan nomor ...*\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in old))
+    store.event("digest_sent", messages=count)
 
 
 async def decide_note(ask_id: str | None, decision: str, member, new_text: str = "", reference=None):
@@ -1126,8 +1350,10 @@ async def decide_note(ask_id: str | None, decision: str, member, new_text: str =
     memory.save_pending(pending)
     store.activity(kind="memory_decision", user=str(member), user_id=member.id, decision=decision, text=p["text"])
     if decision == "simpan":
-        note = memory.add(new_text or p["text"], p["by"], p["source"])
-        await send(ctl, f"Sip, aku inget: [{note['id']}] {note['text']}", reference=reference)
+        gone = memory.remove(p.get("replaces") or [])
+        note = save_note(new_text or p["text"], p["by"], p.get("source", ""), p.get("slug", ""))
+        extra = f" Catatan lama nomor {', '.join(str(n['id']) for n in gone)} aku ganti." if gone else ""
+        await send(ctl, f"Sip, aku inget: [{note['id']}] {note['text']}.{extra}", reference=reference)
     else:
         await send(ctl, "Oke, nggak aku simpan.", reference=reference)
 
@@ -1196,13 +1422,14 @@ VIRAL_REACTIONS = {"✅": "kirim", "🔁": "ganti", "❌": "skip"}
 async def viral_loop():
     """Sekali sehari (mulai VIRAL_POST_HOUR WIB): share konten paling meledak tiap campaign.
     Campaign 🟢: langsung dikirim otomatis (admin dikabari). Konten janggal nggak pernah dikirim, tapi dilaporkan ke
-    admin. Campaign 🟡/🔴 dilewati. Kalau preview gambar gagal, tetap minta acc admin dulu."""
+    admin. Campaign 🟡/🔴 dilewati. Kalau preview gambar gagal, coba konten berikutnya, lalu kirim tanpa gambar."""
     if not viral.due():
         return
     guild = home_guild()
     if not guild:
         return
     channels = campaign_channels(guild)
+    await expire_viral_pending()
     waiting = {p["slug"] for p in store.load(VIRAL_PENDING, {}).values()}
     for slug in viral.reports():
         campaign = watcher.get(slug)
@@ -1269,31 +1496,56 @@ async def pick_viral(campaign: dict, candidates: list[dict]) -> tuple[dict | Non
     return chosen, flagged
 
 
+async def expire_viral_pending():
+    """Usulan top views yang nggak dijawab admin jangan nahan campaign-nya: buang, biar Minhub putuskan sendiri."""
+    if not config.VIRAL_AUTO_SEND:
+        return
+    pending = store.load(VIRAL_PENDING, {})
+    limit = discord.utils.utcnow() - datetime.timedelta(hours=config.VIRAL_PENDING_MAX_HOURS)
+    expired = {ask_id: p for ask_id, p in pending.items() if discord.utils.snowflake_time(int(ask_id)) < limit}
+    if not expired:
+        return
+    store.save(VIRAL_PENDING, {k: v for k, v in pending.items() if k not in expired})
+    for ask_id, p in expired.items():
+        try:
+            os.remove(os.path.join(VIRAL_CACHE, f"{ask_id}.jpg"))
+        except OSError:
+            pass
+        title = (watcher.get(p["slug"]) or {}).get("title", p["slug"])
+        await alert(f"Usulan top views **{title}** kelamaan nggak dijawab, jadi aku yang putusin sendiri ya.",
+                    cooldown=False)
+
+
 async def auto_share_viral(guild: discord.Guild, campaign: dict, channel):
-    """Top views otomatis (campaign 🟢): kirim langsung ke channel campaign, admin dikabari di channel kontrol."""
+    """Top views otomatis (campaign 🟢): kirim langsung ke channel campaign, admin dikabari di channel kontrol.
+    Minhub putuskan sendiri: pilih konten teratas yang wajar dan ada gambarnya, kalau gagal semua kirim tanpa gambar."""
     slug = campaign["slug"]
-    rec, _ = await pick_viral(campaign, await viral.candidates(slug, viral.reports()[slug]))
+    candidates = await viral.candidates(slug, viral.reports()[slug])
+    rec, flagged = await pick_viral(campaign, candidates)
     if not rec:
         viral.mark_skipped(slug)
         return
+    janggal = {r["link"] for r, _ in flagged}
+    preview = None
+    for option in [r for r in candidates[:15] if r["link"] not in janggal][:config.VIRAL_PREVIEW_TRIES]:
+        found = await linkpreview.content_preview(option["link"])
+        if found and found.get("image"):
+            rec, preview = option, found
+            break
     facts = viral.facts(campaign, rec)
-    preview = await linkpreview.content_preview(facts["link"])
     text = await compose(
         "Kabari member di channel campaign ini bahwa ada klip yang lagi viral, biar mereka belajar dari klip itu. "
         "1-2 kalimat, wording variatif dan nggak template. Wajib sebut username kreator persis, nama campaign, "
         "platform, dan jumlah views. Jangan tulis link (link ada di kartu preview).",
         {k: v for k, v in facts.items() if k != "link"}, texts.VIRAL, [facts["user"], facts["views"]])
-    if not preview or not preview.get("image"):
-        # Preview gambar gagal: jangan kirim diam-diam, minta acc admin dulu
-        await show_viral_proposal(control_channel(guild), campaign, channel, rec, text,
-                                  (preview or {}).get("caption"), None, 0)
-        return
-    msg = await send(channel, "@everyone " + text, embeds=[viral_embed(facts, preview.get("caption"), True)],
-                     files=viral_files(preview["image"]), everyone=True)
+    image = (preview or {}).get("image")
+    msg = await send(channel, "@everyone " + text, embeds=[viral_embed(facts, (preview or {}).get("caption"), bool(image))],
+                     files=viral_files(image), everyone=True)
     viral.mark_posted(slug, rec)
     store.event("viral_alert_sent", slug=slug, link=rec["link"], auto=True)
+    note = "" if image else " Preview gambarnya gagal diambil, jadi aku kirim tanpa gambar."
     await alert(f"Top views **{campaign.get('title')}** udah aku share otomatis: {facts['user']} "
-                f"({facts['platform']}, {facts['views']} views) {msg.jump_url}", cooldown=False)
+                f"({facts['platform']}, {facts['views']} views) {msg.jump_url}{note}", cooldown=False)
     log.info("Auto share konten viral %s: %s", slug, rec["link"])
 
 
@@ -1571,6 +1823,7 @@ async def status_loop():
                             "Diskusi Campaign belum ada.", key="perm:rename")
             except discord.HTTPException as e:
                 log.warning("Gagal rename #%s: %s", ch.name, e)
+        await place_campaign_channel(guild, ch, st == "red")
         prev = status.get(slug)
         if prev != st:
             status[slug] = st
@@ -1829,6 +2082,22 @@ async def daily_loop():
     store.event("reminder_sent", channel=channel.name)
 
 
+@tasks.loop(minutes=30)
+async def digest_loop():
+    """Rangkuman obrolan member seminggu sekali ke channel kontrol."""
+    now = store.now_wib()
+    guild = home_guild()
+    if not guild or now.weekday() != config.DIGEST_WEEKDAY or now.hour < config.DIGEST_HOUR:
+        return
+    state = store.load("bot_state.json", {})
+    today = now.date().isoformat()
+    if state.get("digest_last") == today:
+        return
+    state["digest_last"] = today  # dicatat duluan biar gagal pun nggak ngulang tiap 30 menit
+    store.save("bot_state.json", state)
+    await run_digest(guild)
+
+
 REMINDER_FILE = os.path.join(config.DATA_DIR, "reminder_state.json")
 
 
@@ -1873,10 +2142,11 @@ async def heartbeat_loop():
             loop.start()
 
 
-LOOPS = (heartbeat_loop, campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop)
+LOOPS = (heartbeat_loop, campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop,
+         digest_loop)
 
 
-for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop):
+for _loop in (campaign_loop, viral_loop, reminder_loop, status_loop, daily_loop, question_queue_loop, digest_loop):
     @_loop.error
     async def _loop_error(exc, _l=_loop, _name=_loop.coro.__name__):
         """Tugas berkala yang error jangan sampai mati selamanya: lapor admin, nyalakan lagi 1 menit kemudian."""

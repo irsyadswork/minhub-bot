@@ -6,6 +6,8 @@ Fitur:
   channel baru otomatis. Channel dikenali pakai ID (aman walau di-rename); slug campaign juga disimpan di topic channel.
 - **Status budget di nama channel campaign**: 🟢 sisa > 5%, 🟡 sisa > 0–5%, 🔴 habis. Dicek tiap 30 menit, rename cuma
   kalau status berubah. Perubahan status dilaporkan ke `#minhub-control`; kalau jadi 🔴, member di channel itu dikabari.
+- **Kategori terpisah**: channel campaign 🔴 otomatis dipindah ke kategori `Campaign Closed`, dan balik ke kategori aktif
+  kalau statusnya hidup lagi (misal di-extend).
 - **Update campaign**: kalau rate, deadline, min. views, platform, hashtag, brief, dll. berubah di website, Minhub kabari
   di channel campaign itu (sebelum → sesudah). Plus pengingat deadline H-1 dan hari H (jam 09.00 WIB).
 - **Paham konteks**: di channel campaign, bot tahu detail campaign itu (hashtag, min views, deadline, platform, dll.)
@@ -18,15 +20,24 @@ Fitur:
 - **Baca gambar**: screenshot/gambar dari member (kalau nanya) dan dari admin di `#minhub-control` ikut dibaca AI
   (maks `MAX_IMAGES` gambar, `MAX_IMAGE_MB` MB).
 - **Ingatan jangka panjang** (`memory.json`): admin bisa bilang *"ingat: payout siti tiap Jumat"*, *"kamu inget apa
-  aja?"*, atau *"lupain catatan nomor 3"* di `#minhub-control`. Kalau admin membalas pertanyaan member di
-  `#diskusi-general`/channel campaign, Minhub ngusulin ringkasannya jadi catatan; baru disimpan setelah di-acc ✅
-  (atau dibalas revisinya). Catatan dipakai tiap jawab dan diprioritaskan di atas FAQ.
+  aja?"*, atau *"lupain catatan nomor 3"* di `#minhub-control`. Muat sampai `MEMORY_MAX_NOTES` catatan; tiap jawab
+  dia baca yang paling nyambung (`MEMORY_PROMPT_NOTES`) dan catatan diprioritaskan di atas FAQ.
+- **Terus belajar**: jawaban admin ke member (pakai Reply atau nggak), koreksi/penolakan admin, dan rangkuman obrolan
+  diusulin jadi catatan. Semua usulan baru disimpan setelah di-acc ✅ (atau dibalas revisinya), jadi member nggak bisa
+  ngajarin yang salah. Kalau catatan baru bentrok sama yang lama, atau catatan campaign yang udah selesai, admin ditanya.
+- **Kritis & tanya balik**: perintah admin dicek ke data campaign & catatan; kalau beda atau berisiko, Minhub kasih
+  saran dulu, keputusan tetap di admin. Kalau bingung atau datanya nggak ada, dia nanya balik. Kalau ragu pas jawab
+  member, dia juga nanya ke `#minhub-control`.
+- **Rangkuman obrolan member**: tiap Senin 10.00 WIB di `#minhub-control` (pola, kebingungan, saran). Bisa juga diminta
+  kapan aja, misal *"ada learning baru dari clipper?"*.
 - **Jeda humanis** 5–60 detik dengan status "typing..." sebelum membalas.
 - **Pengumuman campaign baru** di `#pengumuman` (dicek tiap 3 menit): tag @everyone, teks variatif (nama, brand, rate,
   deadline, channel diskusi) + kartu campaign.
 - **Konten top views** dari laporan client (sekali sehari per campaign mulai 19.00 WIB), dengan kartu preview buatan
   sendiri (thumbnail, caption, akun, platform, views, link). Campaign 🟢 dikirim otomatis (admin dikabari);
-  campaign 🟡/🔴 dilewati; kalau preview gambar gagal, minta acc admin dulu. Admin juga bisa minta cek kapan aja.
+  campaign 🟡/🔴 dilewati. Kalau preview gambar gagal, Minhub coba konten berikutnya, lalu kirim tanpa gambar kalau
+  gagal semua. Usulan yang nggak dijawab admin lewat `VIRAL_PENDING_MAX_HOURS` jam diputuskan sendiri. Admin juga bisa
+  minta cek kapan aja.
 - **Deteksi konten janggal**: rasio likes/views yang nggak wajar (curiga suntik views) nggak pernah di-share dan
   langsung dilaporkan ke `#minhub-control`. Batasnya per platform di `config.py` (`VIRAL_MIN_LIKE_RATIO`).
 - **Tambah laporan lewat chat**: "laporan <campaign>: <link laporan>" di `#minhub-control` (disimpan di `reports.json`).
@@ -69,7 +80,8 @@ Catatan:
 - Server-wide (role Minhub): View Channels, Send Messages, Embed Links, Attach Files, Read Message History,
   Add Reactions, Mention Everyone, Pin Messages.
 - Khusus kategori "Diskusi Campaign" (permission overwrite untuk role Minhub): **Manage Channels** + **Manage Permissions**
-  (buat bikin channel campaign baru dan ganti emoji status di namanya).
+  (buat bikin channel campaign baru dan ganti emoji status di namanya). Kategori "Campaign Closed" juga butuh izin yang sama
+  (buat mindahin channel campaign yang selesai).
 - Nggak perlu Manage Channels / Manage Roles di level server.
 
 ## Menyalakan bot di PC (untuk tes)

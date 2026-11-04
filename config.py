@@ -37,6 +37,7 @@ CAMPAIGN_CHANNEL = "pengumuman"        # tempat pengumuman campaign baru
 
 # --- Channel per campaign (dibuat & diatur otomatis oleh bot) ---
 CAMPAIGN_CATEGORY = "Diskusi Campaign 🎬"
+CLOSED_CATEGORY = "Campaign Closed"     # channel campaign 🔴 dipindah ke kategori ini (dibuat admin, dicari pakai nama)
 CAMPAIGN_CHANNEL_SEPARATOR = "・"       # nama channel: <status budget>・<slug campaign>
 
 # --- Role admin yang di-tag untuk pertanyaan teknis & boleh ngasih perintah ---
@@ -68,7 +69,13 @@ GEMINI_TIMEOUT = 15                    # detik per percobaan (model ringan)
 GEMINI_TIMEOUT_SMART = 30              # detik per percobaan (model pintar, butuh waktu buat mikir)
 MAX_IMAGES = 3                         # maks gambar per pesan yang ikut dibaca AI
 MAX_IMAGE_MB = 5                       # gambar lebih gede dari ini nggak dibaca
-MEMORY_MAX_NOTES = 100                 # maks catatan yang Minhub inget (yang paling lama dibuang duluan)
+MEMORY_MAX_NOTES = 2000                # maks catatan yang Minhub inget (kalau hampir penuh, admin dikabari)
+MEMORY_PROMPT_NOTES = 40               # catatan paling nyambung yang ikut dibaca AI tiap jawab
+DIGEST_WEEKDAY = 0                     # rangkuman obrolan member: hari (0 = Senin)
+DIGEST_HOUR = 10                       # jam (WIB)
+DIGEST_DAYS = 7                        # berapa hari ke belakang yang dibaca
+DIGEST_MAX_PER_CHANNEL = 150           # maks pesan per channel yang dibaca
+DIGEST_MAX_NOTES = 3                   # maks usulan catatan per rangkuman
 GEMINI_RETRIES = 1                     # kena 503/429/timeout: coba ulang sekian kali sebelum pindah model
 GEMINI_RETRY_DELAY = 2                 # detik jeda sebelum coba ulang
 
@@ -103,6 +110,8 @@ VIRAL_MIN_LIKE_RATIO_DEFAULT = 0.0008
 VIRAL_SUSPICIOUS_MIN_VIEWS = 10_000
 # Top views jam VIRAL_POST_HOUR dikirim otomatis (tanpa acc) cuma untuk campaign yang statusnya 🟢.
 VIRAL_AUTO_SEND = True
+VIRAL_PREVIEW_TRIES = 5                # preview gambar gagal: coba sekian kandidat, kalau gagal semua kirim tanpa gambar
+VIRAL_PENDING_MAX_HOURS = 3            # usulan yang nggak dijawab admin selama ini diputuskan sendiri oleh Minhub
 # Nama panggilan campaign yang biasa dipakai member (slug -> alias). Kalau tetap ambigu, Minhub nanya balik.
 CAMPAIGN_ALIASES = {
     "semanis-drama-tropicana-slim": ["dracin", "drama china", "semanis", "tropicana", "istri kontrak"],
