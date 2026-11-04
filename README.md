@@ -43,6 +43,8 @@ Fitur:
 - **Tambah laporan lewat chat**: "laporan <campaign>: <link laporan>" di `#minhub-control` (disimpan di `reports.json`).
 - **Pengingat harian 17.00 WIB** di `#diskusi-general`: tag @everyone, teks ditulis AI tiap hari + sisa budget tiap campaign.
   Aktif setelah admin react ✅ di contoh yang dikirim ke `#minhub-control`.
+- **Nyambung sama permintaan sebelumnya**: kalau Minhub nanya balik, permintaan aslinya (channel, gambar, isi) tetap diinget
+  dan dilanjutin begitu admin jawab (`open_requests.json`). Forward + komentar dibaca jadi satu perintah.
 - **Draf tahan lama**: draf perintah admin disimpan di `drafts.json` selama `DRAFT_KEEP_HOURS` jam (tahan restart). Bisa
   di-acc kapan aja lewat ✅ atau chat (*"acc"*, *"kirim aja"*), oleh admin mana pun.
 - **Perintah admin** di `#minhub-control`: misal *"@Minhub di #pengumuman umumin ... + link"*. Channel tujuan diambil dari

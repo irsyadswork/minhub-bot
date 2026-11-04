@@ -640,7 +640,8 @@ async def on_message(message: discord.Message):
 
     if is_channel(base, config.CONTROL_CHANNEL_ID, config.CONTROL_CHANNEL):
         if is_admin(message.author):
-            await handle_control(message)
+            if not await forward_has_comment(message):
+                await handle_control(message)
         else:
             store.activity(kind="control_non_admin", user=str(message.author), user_id=message.author.id,
                            text=message.content[:200])
@@ -898,6 +899,48 @@ async def recover_unanswered(guild: discord.Guild, since: datetime.datetime):
 
 # ---------- perintah admin di #minhub-control ----------
 
+# Permintaan admin yang lagi ditanyain balik (id admin -> permintaan), biar channel, gambar, dan isinya nggak kelupaan.
+open_requests: dict[int, dict] = {int(k): v for k, v in store.load("open_requests.json", {}).items()}
+
+
+def save_requests():
+    store.save("open_requests.json", {str(k): v for k, v in open_requests.items()})
+
+
+def open_request(author_id: int) -> dict | None:
+    req = open_requests.get(author_id)
+    if req and time.time() - req["t"] > config.DRAFT_KEEP_HOURS * 3600:
+        open_requests.pop(author_id)
+        save_requests()
+        return None
+    return req
+
+
+def request_text(req: dict | None) -> str:
+    if not req:
+        return ""
+    return (req["text"] + (f" (tujuan: #{req['channel']})" if req.get("channel") else "")
+            + (" (ada lampiran yang harus ikut dikirim)" if req.get("source") else ""))
+
+
+def channel_by_name(guild: discord.Guild, name: str):
+    """Channel dari nama yang disebut AI. Emoji & pemisah nggak dihitung, dan harus cocok persis."""
+    def plain(text):
+        return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+    wanted = plain(name)
+    return discord.utils.find(lambda c: plain(c.name) == wanted, guild.text_channels) if wanted else None
+
+
+async def source_images(source: list | None) -> list[tuple[bytes, str]]:
+    if not source:
+        return []
+    try:
+        return await read_images(await client.get_channel(source[0]).fetch_message(source[1]))
+    except (discord.HTTPException, AttributeError) as e:
+        log.warning("Gagal baca lampiran permintaan sebelumnya: %s", e)
+        return []
+
+
 def save_drafts():
     store.save("drafts.json", {str(k): v for k, v in drafts.items()})
 
@@ -951,6 +994,21 @@ async def send_draft(owner: int, draft: dict, member, reference=None):
     log.info("Admin %s kirim info ke #%s", member, target.name)
 
 
+async def forward_has_comment(message: discord.Message) -> bool:
+    """Admin forward pesan tanpa teks: komentarnya biasanya nyusul sebagai pesan terpisah. Kalau ada, yang diproses komentarnya
+    aja (pesan forward ikut kebaca dari obrolan), biar Minhub nggak jawab dua kali."""
+    if message.content.strip() or not getattr(message, "message_snapshots", None):
+        return False
+    await asyncio.sleep(config.FORWARD_WAIT_SECONDS)
+    try:
+        async for m in message.channel.history(limit=5, after=message):
+            if m.author == message.author and m.content.strip():
+                return True
+    except discord.HTTPException as e:
+        log.warning("Gagal cek komentar setelah forward: %s", e)
+    return False
+
+
 async def control_reply(message: discord.Message, text: str, error: bool = False):
     sent = await send(message.channel, text, reference=message, raw=error)
     if error:
@@ -990,6 +1048,7 @@ async def handle_control(message: discord.Message):
     except Exception as e:
         log.warning("Gagal ambil data website buat perintah admin: %s", e)
     channel_content = await channels_content(targets)
+    req = open_request(author.id)
 
     try:
         async with message.channel.typing():
@@ -1001,7 +1060,7 @@ async def handle_control(message: discord.Message):
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
                 pending_announcements_text(), channel_content, memory.text(query=message_text(message), with_ids=True),
                 memory.pending_text(),
-                await read_images(message))
+                await read_images(message) or await source_images((req or {}).get("source")), request_text(req))
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -1013,6 +1072,19 @@ async def handle_control(message: discord.Message):
         return
 
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
+    carried = req if cmd["lanjut_permintaan"] else None  # jawaban buat pertanyaan Minhub: lanjutin permintaan aslinya
+    if carried:
+        open_requests.pop(author.id, None)
+    if cmd["aksi"] == "tanya":
+        first = targets[0] if targets else None
+        open_requests[author.id] = {
+            "text": (carried["text"] + "\nJawaban admin: " if carried else "") + message_text(message),
+            "channel_id": first.id if first else (carried or {}).get("channel_id"),
+            "channel": first.name if first else (carried or {}).get("channel"),
+            "source": [message.channel.id, message.id] if all_attachments(message) else (carried or {}).get("source"),
+            "t": time.time()}
+    if carried or cmd["aksi"] == "tanya":
+        save_requests()
     if cmd["saran"] and cmd["aksi"] not in ("balas", "tanya"):
         await control_reply(message, f"Saran dari aku kak: {cmd['saran']}")
     if cmd["aksi"] == "laporan":
@@ -1122,7 +1194,7 @@ async def handle_control(message: discord.Message):
     if cmd["aksi"] not in ("kirim", "preview"):
         await control_reply(message, cmd["balasan"] or "Siap.")
         return
-    if (cmd["aksi"] == "kirim" and not cmd["pesan"] and draft and draft.get("confirm_id") and not targets
+    if (cmd["aksi"] == "kirim" and not cmd["pesan"] and draft and draft.get("confirm_id") and not targets and not carried
             and not all_attachments(message)):  # admin acc lewat chat: udah lihat preview-nya, langsung kirim
         await send_draft(owner, draft, author, reference=message)
         return
@@ -1131,13 +1203,14 @@ async def handle_control(message: discord.Message):
     if (draft and cmd["pesan"] and cmd["pesan"] != draft["text"] and isinstance(ref, discord.Message)
             and ref.id in draft.get("preview_ids", ())):  # admin merevisi draf: siapa tahu ada pelajaran buat lain kali
         asyncio.create_task(learn_from_correction(message, draft["text"]))
-    source = [message.channel.id, message.id] if all_attachments(message) else (draft.get("source") if draft else None)
+    earlier = carried or draft or {}
+    source = [message.channel.id, message.id] if all_attachments(message) else earlier.get("source")
     if not text and not source:
         await control_reply(message, f"Aku lagi nggak pegang draf apa pun kak (draf aku simpan {config.DRAFT_KEEP_HOURS} "
                                      f"jam). Tulis lagi aja isinya ya.")
         return
-    target = targets[0] if targets else (message.guild.get_channel(draft["channel_id"])
-                                         if draft and draft.get("channel_id") else None)
+    target = targets[0] if targets else (message.guild.get_channel(earlier["channel_id"])
+                                         if earlier.get("channel_id") else channel_by_name(message.guild, cmd["tujuan"]))
     everyone = cmd.get("everyone", False)
     drafts.pop(owner, None)
     new_draft = {"text": text, "source": source, "channel_id": target.id if target else None,
