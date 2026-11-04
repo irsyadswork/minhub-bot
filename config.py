@@ -102,6 +102,7 @@ REPORTS = {
     "film-piye-to-kih": "film-piye-to-kih-1cfw6gredv",
     "fadil-jaidi-x-vitameal-podcast-raditya-dika": "fadil-jaidi-x-vitameal-pz22vib4ee",
     "film-the-doll-ghawiah": "the-doll-ghawiah-kntqc4n013",
+    "vitameal-keranjang-kuning": "kkvitameal-4zem9hs9h2",
 }
 # Laporan baru bisa ditambah lewat chat di #minhub-control ("laporan <campaign>: <link>"), disimpan di reports.json.
 
@@ -127,6 +128,7 @@ CAMPAIGN_ALIASES = {
     "film-piye-to-kih": ["piye", "piye to kih"],
     "fadil-jaidi-x-vitameal-podcast-raditya-dika": ["fadil", "fadil jaidi", "vitameal", "raditya dika"],
     "film-the-doll-ghawiah": ["the doll", "doll", "ghawiah"],
+    "vitameal-keranjang-kuning": ["kerkun", "vitameal kerkun", "keranjang kuning", "kk vitameal"],
 }
 VIRAL_POST_HOUR = 19                  # jam (WIB) mulai share tiap hari
 VIRAL_MIN_VIEWS = 100_000              # minimal views normal
