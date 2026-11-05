@@ -2237,9 +2237,10 @@ async def decide_deadline(message: discord.Message, slug: str, decision: str, ne
 
 
 def budget_line() -> str:
-    parts = [f"**{c.get('title')}** {watcher.pct_text(watcher.remaining_pct(c))}"
-             for c in watcher.active() if watcher.remaining_pct(c) is not None]
-    return ("Sisa budget: " + " · ".join(parts)) if parts else ""
+    known = [c for c in watcher.active() if watcher.remaining_pct(c) is not None]
+    known.sort(key=watcher.remaining_pct, reverse=True)
+    parts = [f"💵 {c.get('title')}: {watcher.pct_text(watcher.remaining_pct(c))}" for c in known]
+    return ("**Sisa budget:**\n" + "\n".join(parts)) if parts else ""
 
 
 async def daily_text() -> str:
@@ -2250,7 +2251,7 @@ async def daily_text() -> str:
         "ajak tanya kalau ada kendala. Pendek, 2-3 kalimat, beda dari kemarin.",
         {"tanggal": store.now_wib().strftime("%A %d %B %Y"), "campaign_aktif": len(watcher.active())},
         texts.DAILY_REMINDER, ["upload"])
-    return text + (f"\n{line}" if line else "")
+    return tidy(text) + (f"\n\n{line}" if line else "")  # dirapiin di sini: tidy ngebuang emoji 💵 di daftar budget
 
 
 @tasks.loop(minutes=5)
@@ -2271,7 +2272,7 @@ async def daily_loop():
         text = await daily_text()
         await send(ctl, f"Contoh pengingat harian yang bakal aku kirim ke {channel.mention} tiap jam "
                         f"{config.DAILY_REMINDER_HOUR}.00 WIB (teksnya ganti tiap hari):")
-        msg = await ctl.send(">>> @everyone " + tidy(text), allowed_mentions=discord.AllowedMentions.none())
+        msg = await ctl.send(">>> @everyone " + text, allowed_mentions=discord.AllowedMentions.none())
         await ctl.send("React ✅ di contoh di atas buat aktifin. Kalau belum oke, abaikan aja dulu.")
         await msg.add_reaction("✅")
         daily["preview_id"] = msg.id
@@ -2285,7 +2286,7 @@ async def daily_loop():
     if not channel.permissions_for(guild.me).mention_everyone:
         await alert(f"Pengingat harian belum bisa tag @everyone di {channel.mention}: role Minhub butuh izin "
                     f"**Mention Everyone**.", key="perm:everyone")
-    await send(channel, "@everyone " + await daily_text(), everyone=True)
+    await send(channel, "@everyone " + await daily_text(), everyone=True, raw=True)
     daily["last"] = today
     store.save("bot_state.json", state)
     store.event("reminder_sent", channel=channel.name)
