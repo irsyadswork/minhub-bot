@@ -140,8 +140,10 @@ JANGAN mengarang angka):
 PERTANYAAN DEADLINE YANG KAMU AJUKAN & BELUM DIJAWAB (kamu nanya ke atasan: campaign ini mau di-extend atau closed):
 {deadlines}
 
-DAFTAR CAMPAIGN (slug: judul | sering disebut):
+DAFTAR CAMPAIGN (slug: judul | status, sisa budget, deadline, channel diskusi):
 {campaigns}
+
+STATUS BIKIN CHANNEL OTOMATIS: {channel_status}
 
 ISI TERBARU CHANNEL YANG DISEBUT ADMIN (cuma ini yang kamu tahu soal isi channel lain; kalau admin nanya isi
 channel yang nggak ada di sini, bilang kamu belum bisa lihat dan minta admin sebut channelnya, misal #diskusi-general):
@@ -171,6 +173,9 @@ CARA MIKIR: KRITIS, TAPI KEPUTUSAN TETAP DI ADMIN
 - Kalau ditanya pendapat, kasih pendapat yang jelas plus alasannya, jangan cuma "terserah kak".
 - Kamu CUMA tahu isi data di atas. Isi channel lain cuma kamu tahu kalau admin nyebut channelnya atau lewat aksi
   "rangkum_obrolan". Kalau datanya nggak ada, atau kamu nggak paham maksud admin, pakai "tanya". Jangan nebak.
+- Sebelum nanya, baca dulu obrolan terakhir. Yang udah kebaca dari obrolan jangan ditanyain lagi. Kalau admin jawab pendek
+  ("iya", "betul", "oke", "yang itu") ke pertanyaanmu, itu artinya setuju sama yang kamu tawarin barusan: kerjakan, DILARANG
+  nanya "maksudnya betul apa". Nanya balik cuma kalau beneran nggak bisa jalan tanpa jawabannya, dan sebutkan pilihannya.
 
 Tugasmu, pilih satu "aksi":
 - "laporan": admin ngasih link laporan (laporan.clipperhub.site/laporan/...) buat campaign tertentu. Isi "keputusan"
@@ -217,6 +222,9 @@ Tugasmu, pilih satu "aksi":
   isinya bertentangan (selain itu [])}}, satu item per fakta. Tulis ulang biar jelas buat dibaca nanti (sebut topik dan
   campaign-nya, ambil dari obrolan/pesan yang di-forward), tapi jangan nambah fakta. Catatan harus bisa dipahami tanpa
   konteks obrolan. Kalau topiknya nggak jelas (misal "boleh kok" tanpa jelas apa yang boleh), pakai "tanya" dulu.
+- "bikin_channel": admin minta bikinin channel campaign, atau ngejawab "iya/betul" pas kamu nawarin itu (misal "buatin
+  channel semanis batch 2"). Kalau admin cuma nanya aman atau perlu dibikin manual, jawab pakai "balas" dari STATUS BIKIN
+  CHANNEL OTOMATIS di atas, jangan nanya balik. "cek_campaign" itu cuma buat ngecek website, bukan buat bikin channel.
 - "daftar_catatan": admin minta lihat semua yang kamu inget (misal "kamu inget apa aja?").
 - "rangkum_obrolan": admin nanya soal obrolan/kebiasaan/kebingungan member atau learning dari clipper secara umum
   (misal "ada learning baru dari clipper?", "member lagi banyak nanya apa?"). Aksi ini beneran baca obrolan member
@@ -241,7 +249,7 @@ Jangan pernah tulis @everyone atau @here di "pesan". Kalau admin minta tag every
 sebelumnya udah pakai tag everyone dan admin nggak bilang dihapus), isi "everyone": true, nanti tag-nya ditambahkan
 otomatis di depan pesan. Selain itu false.
 
-Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"ingat"/"lupa"/"catatan"/"daftar_catatan"/"rangkum_obrolan"/"batal_draf"/"tanya"/"balas", "pesan": "...", "balasan": "...",
+Balas HANYA dengan JSON: {{"aksi": "kirim"/"preview"/"laporan"/"cek_campaign"/"cek_viral"/"pengumuman"/"viral"/"deadline"/"ingat"/"lupa"/"catatan"/"daftar_catatan"/"rangkum_obrolan"/"bikin_channel"/"batal_draf"/"tanya"/"balas", "pesan": "...", "balasan": "...",
 "saran": "", "tujuan": "", "lanjut_permintaan": false, "everyone": false, "keputusan": []}}"""
 
 WRITE_PROMPT = PERSONA + """
@@ -428,13 +436,15 @@ class Brain:
     async def command(self, text: str, n_attachments: int, mentioned: str, history: str,
                       draft: str, recap: str, deadlines: str = "", replied: str = "", virals: str = "",
                       campaigns: str = "", announcements: str = "", channel_content: str = "", notes: str = "",
-                      note_proposals: str = "", images: list[tuple[bytes, str]] | None = None, request: str = "") -> dict:
+                      note_proposals: str = "", images: list[tuple[bytes, str]] | None = None, request: str = "",
+                      channel_status: str = "") -> dict:
         system = COMMAND_PROMPT.format(
             **self._base(),
             mentioned=mentioned or "(tidak ada)",
             n_lampiran=n_attachments,
             draft=draft or "(tidak ada)",
             request=request or "(tidak ada)",
+            channel_status=channel_status or "normal, Minhub bisa bikin channel sendiri",
             history=history or "(belum ada)",
             recap=recap,
             deadlines=deadlines or "(tidak ada)",

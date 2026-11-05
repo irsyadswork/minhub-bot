@@ -455,7 +455,7 @@ async def sync_guild(guild: discord.Guild):
             store.save("bot_state.json", state)
             log.warning("Bikin channel kena rate limit Discord sampai %s", until)
             missing = [c for c in watcher.active() if c["slug"] not in campaign_channels(guild)]
-            lines = "\n".join(f"- nama `{watcher.channel_name(c)}`, topic `{watcher.channel_topic(c)}`" for c in missing)
+            lines = manual_channel_guide(missing)
             await alert(f"Discord nahan aku bikin channel baru sampai {until.strftime('%d %b %H:%M')} WIB. Aku coba lagi "
                         f"setelah itu. Kalau mau sekarang, bikin manual di kategori Diskusi Campaign, nanti aku kenali dari "
                         f"topic-nya:\n{lines}", key="create:limit", cooldown=False)
@@ -1016,7 +1016,63 @@ async def control_reply(message: discord.Message, text: str, error: bool = False
     return sent
 
 
+control_lock = asyncio.Lock()
+
+
 async def handle_control(message: discord.Message):
+    """Perintah admin diproses satu-satu, biar yang kedua udah baca jawaban buat yang pertama."""
+    async with control_lock:
+        await process_control(message)
+
+
+def missing_channels(guild: discord.Guild) -> list[dict]:
+    channels = campaign_channels(guild)
+    return [c for c in watcher.active() if c["slug"] not in channels]
+
+
+def channel_block_until() -> datetime.datetime | None:
+    blocked = store.load("bot_state.json", {}).get("create_blocked_until")
+    until = datetime.datetime.fromisoformat(blocked) if blocked else None
+    return until if until and store.now_wib() < until else None
+
+
+def manual_channel_guide(missing: list[dict]) -> str:
+    return "\n".join(f"- nama `{watcher.channel_name(c)}`, topic `{watcher.channel_topic(c)}`" for c in missing)
+
+
+def channel_status_text(guild: discord.Guild) -> str:
+    until = channel_block_until()
+    missing = ", ".join(c.get("title", c["slug"]) for c in missing_channels(guild)) or "nggak ada"
+    if until:
+        return (f"DITAHAN Discord sampai {until.strftime('%d %b %H:%M')} WIB, jadi kamu belum bisa bikin channel. Admin aman "
+                f"bikin manual sekarang di kategori Diskusi Campaign, nanti kamu kenali dari topic-nya. Channel yang kurang: {missing}")
+    return f"normal, kamu bisa bikin sendiri lewat aksi bikin_channel. Channel yang kurang: {missing}"
+
+
+async def create_channels_now(message: discord.Message):
+    """Admin minta bikinin channel: bikin kalau bisa, kalau ditahan Discord kasih tahu cara manualnya."""
+    guild = message.guild
+    missing = missing_channels(guild)
+    if not missing:
+        await control_reply(message, "Semua campaign aktif udah punya channel kak.")
+        return
+    until = channel_block_until()
+    if until:
+        await control_reply(message, f"Belum bisa kak, Discord nahan aku bikin channel sampai {until.strftime('%d %b %H:%M')} WIB. "
+                                     f"Kalau mau sekarang, kakak aman bikin manual di kategori Diskusi Campaign, nanti aku "
+                                     f"kenali dari topic-nya:\n{manual_channel_guide(missing)}")
+        return
+    await asyncio.wait_for(sync_guild(guild), timeout=120)
+    left = missing_channels(guild)
+    made = [c for c in missing if c not in left]
+    if made:
+        mapping = campaign_channels(guild)
+        await control_reply(message, "Udah aku bikinin:\n" + "\n".join(f"- {mapping[c['slug']].mention}" for c in made))
+    if left and not channel_block_until():  # kalau ditahan Discord, sync_guild udah ngabarin cara manualnya
+        await control_reply(message, f"Yang ini belum berhasil kak:\n{manual_channel_guide(left)}")
+
+
+async def process_control(message: discord.Message):
     """Admin ngobrol/nyuruh Minhub di channel kontrol. Pengiriman selalu lewat preview + konfirmasi ✅.
     Channel tujuan diambil dari mention channel (#pengumuman); kalau nggak disebut, Minhub nanya dulu."""
     author = message.author
@@ -1060,7 +1116,8 @@ async def handle_control(message: discord.Message):
                 store.recap(), pending_deadlines_text(), replied, pending_virals_text(), campaign_list(),
                 pending_announcements_text(), channel_content, memory.text(query=message_text(message), with_ids=True),
                 memory.pending_text(),
-                await read_images(message) or await source_images((req or {}).get("source")), request_text(req))
+                await read_images(message) or await source_images((req or {}).get("source")), request_text(req),
+                channel_status_text(message.guild))
     except AIBusy as e:
         log.warning("Perintah admin: Gemini penuh: %s", e)
         await control_reply(message, f"Gemini lagi penuh (503/429/timeout), udah dicoba ulang tapi masih gagal. "
@@ -1072,7 +1129,9 @@ async def handle_control(message: discord.Message):
         return
 
     log.info("[admin/%s] %s: %s", cmd["aksi"], author, message.content[:80])
-    carried = req if cmd["lanjut_permintaan"] else None  # jawaban buat pertanyaan Minhub: lanjutin permintaan aslinya
+    # Jawaban buat pertanyaan Minhub (AI bilang nyambung, atau admin nge-reply Minhub): lanjutin permintaan aslinya
+    answering = isinstance(ref, discord.Message) and ref.author == client.user
+    carried = req if cmd["lanjut_permintaan"] or (cmd["aksi"] == "tanya" and answering) else None
     if carried:
         open_requests.pop(author.id, None)
     if cmd["aksi"] == "tanya":
@@ -1082,7 +1141,11 @@ async def handle_control(message: discord.Message):
             "channel_id": first.id if first else (carried or {}).get("channel_id"),
             "channel": first.name if first else (carried or {}).get("channel"),
             "source": [message.channel.id, message.id] if all_attachments(message) else (carried or {}).get("source"),
-            "t": time.time()}
+            "asked": (carried or {}).get("asked", 0) + 1, "t": time.time()}
+        if open_requests[author.id]["asked"] > 2:  # udah dua kali nanya masih nggak nangkep: jangan muter-muter
+            open_requests.pop(author.id)
+            cmd["balasan"] = ("Maaf kak, aku masih belum nangkep, daripada muter-muter nanya terus. Boleh tulis lengkap "
+                              "dalam satu pesan? Misal *buatin channel campaign X* atau *umumin Y di #channel*")
     if carried or cmd["aksi"] == "tanya":
         save_requests()
     if cmd["saran"] and cmd["aksi"] not in ("balas", "tanya"):
@@ -1143,6 +1206,13 @@ async def handle_control(message: discord.Message):
         if saved:
             store.activity(kind="memory_add", user=str(author), user_id=author.id, notes=[n["text"] for n in saved])
             await control_reply(message, "Oke, aku inget:\n" + "\n".join(f"- [{n['id']}] {n['text']}" for n in saved))
+        return
+    if cmd["aksi"] == "bikin_channel":
+        try:
+            await create_channels_now(message)
+        except Exception as e:
+            log.exception("Gagal bikin channel atas perintah admin")
+            await control_reply(message, f"Gagal bikin channel: `{type(e).__name__}: {str(e)[:300]}`", error=True)
         return
     if cmd["aksi"] == "daftar_catatan":
         items = memory.notes()
@@ -1803,7 +1873,8 @@ def campaign_list() -> str:
     guild = home_guild()
     channels = campaign_channels(guild) if guild else {}
     return "\n".join(
-        f"- {c['slug']}: {c.get('title')} | status {c.get('status')} | dibuat {c.get('createdAt') or '-'} | "
+        f"- {c['slug']}: {c.get('title')} | status {c.get('status')} | sisa budget {watcher.pct_text(watcher.remaining_pct(c))} | "
+        f"dibuat {c.get('createdAt') or '-'} | "
         f"deadline {c.get('deadline')} | channel diskusi: {'#' + channels[c['slug']].name if c['slug'] in channels else 'BELUM ADA'}"
         + (" | sering disebut: " + ", ".join(config.CAMPAIGN_ALIASES[c["slug"]]) if c["slug"] in config.CAMPAIGN_ALIASES else "")
         for c in watcher.campaigns)
@@ -1839,9 +1910,11 @@ async def check_campaigns_now(message: discord.Message):
     active = watcher.active()
     lines = [f"- **{c.get('title')}** (deadline {format_value('deadline', c.get('deadline'))})"
              + (f" {channels[c['slug']].mention}" if c["slug"] in channels else " (channel belum ada)") for c in active]
-    head = (f"Ada {len(new)} campaign baru, udah aku bikinin channel dan umumin di pengumuman: "
-            + ", ".join(f"**{c.get('title')}**" for c in new) if new
-            else "Nggak ada campaign baru yang belum diumumin, semuanya udah punya channel")
+    no_channel = [c for c in active if c["slug"] not in channels]
+    head = (f"Ada {len(new)} campaign baru, udah aku umumin di pengumuman: " + ", ".join(f"**{c.get('title')}**" for c in new)
+            if new else "Nggak ada campaign baru yang belum diumumin")
+    head += (f". Yang belum punya channel: {', '.join(c.get('title', c['slug']) for c in no_channel)}" if no_channel
+             else ". Semua campaign aktif udah punya channel")
     await send(message.channel, f"{head}.\nCampaign aktif sekarang ({len(active)}):\n" + "\n".join(lines),
                reference=message)
 
